@@ -114,9 +114,10 @@ func main() {
 		chatMessagesWidget.ScrollToBottom()
 	}
 
-	go func() {
-		addRelay("wss://groups.nostr.com/nostr", relayRoomsWidget, chatMessagesWidget)
-	}()
+	// Auto add the Nostr Relay
+	// go func() {
+	// 	addRelay("wss://groups.nostr.com/nostr", relayRoomsWidget, chatMessagesWidget)
+	// }()
 
 	toolbar := widget.NewToolbar(
 		widget.NewToolbarAction(theme.AccountIcon(), func() {
