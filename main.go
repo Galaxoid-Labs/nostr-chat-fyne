@@ -186,6 +186,24 @@ func main() {
 				}
 			}, w)
 		}),
+		widget.NewToolbarAction(theme.DeleteIcon(), func() {
+			dialog.NewConfirm("Reset local data?", "This will remove all relays and your private key.", func(b bool) {
+				if b {
+					chatRelays = nil
+					for _, chatRelay := range chatRelays {
+						chatRelay.Relay.Close()
+					}
+
+					chatRelays = nil
+					relayRoomsMenuData = nil
+					a.Preferences().RemoveValue(RELAYSKEY)
+					relayRoomsWidget.Refresh()
+					chatMessagesWidget.Refresh()
+
+					keyring.Delete(APPID, USERKEY)
+				}
+			}, w).Show()
+		}),
 	)
 
 	leftSide := container.NewBorder(nil, container.NewPadded(toolbar), nil, nil, container.NewPadded(relayRoomsWidget))
