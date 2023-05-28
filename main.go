@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -21,13 +22,14 @@ import (
 
 const APPID = "com.galaxoidlabs.nostrchat"
 const USERKEY = "userkey"
+const RELAYSKEY = "relayskey"
 
 var baseSize = fyne.Size{Width: 900, Height: 640}
 
 var chatRelays = make(map[string]ChatRelay, 0)
 var relayRoomsMenuData = make([]LeftMenuItem, 0)
 var selectedRelayUrl = ""
-var selectedRoomId = ""
+var selectedRoomId = "/"
 var a fyne.App
 var w fyne.Window
 
@@ -110,7 +112,7 @@ func main() {
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) { // CHECK out of index...
 			if len(relayRoomsMenuData) > i {
-				if relayRoomsMenuData[i].RoomID == "" {
+				if relayRoomsMenuData[i].RoomID == "/" {
 					o.(*widget.Label).SetText(relayRoomsMenuData[i].RelayURL)
 				} else {
 					o.(*widget.Label).SetText("    " + relayRoomsMenuData[i].RoomID)
@@ -128,7 +130,12 @@ func main() {
 
 	// Auto add the Nostr Relay
 	go func() {
-		addRelay("wss://groups.nostr.com/nostr", relayRoomsWidget, chatMessagesWidget)
+		relays := getRelays()
+		for _, relay := range relays {
+			if relay != "" { // TODO: Better relay validation
+				addRelay(relay, relayRoomsWidget, chatMessagesWidget)
+			}
+		}
 	}()
 
 	toolbar := widget.NewToolbar(
@@ -166,7 +173,7 @@ func main() {
 			dialog.ShowForm("Add a New Room                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
 				widget.NewFormItem("Room Name", entry),
 			}, func(b bool) {
-				if entry.Text != "" {
+				if entry.Text != "" || entry.Text != "/" {
 					addRoom(entry.Text, relayRoomsWidget)
 				}
 			}, w)
@@ -226,11 +233,15 @@ func publishChat(message string) error {
 	for _, chatRelay := range chatRelays {
 		if chatRelay.Relay.URL == selectedRelayUrl {
 			fmt.Println("Publishing to", chatRelay.Relay.URL)
+			u, err := url.Parse(chatRelay.Relay.URL)
+			if err != nil {
+				return err
+			}
 			ev := nostr.Event{
 				PubKey:    publicKey,
 				CreatedAt: nostr.Now(),
 				Kind:      9,
-				Tags:      nostr.Tags{nostr.Tag{"g", selectedRoomId}},
+				Tags:      nostr.Tags{nostr.Tag{"g", selectedRoomId, u.Host}},
 				Content:   message,
 			}
 			err = ev.Sign(hex)
@@ -267,7 +278,7 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 
 		lmi := LeftMenuItem{
 			RelayURL: chatRelay.Relay.URL,
-			RoomID:   "",
+			RoomID:   "/",
 		}
 
 		relayRoomsMenuData = append(relayRoomsMenuData, lmi)
@@ -282,6 +293,9 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 		if err != nil {
 			panic(err)
 		}
+
+		// Save relay
+		saveRelays()
 
 		for ev := range sub.Events {
 
@@ -335,7 +349,7 @@ func updateLeftMenuList(relayList *widget.List) {
 	for _, chatRelay := range chatRelays {
 
 		for _, room := range chatRelay.Rooms {
-			if room.ID != "" {
+			if room.ID != "/" {
 				lmi := LeftMenuItem{
 					RelayURL: chatRelay.Relay.URL,
 					RoomID:   room.ID,
@@ -347,7 +361,7 @@ func updateLeftMenuList(relayList *widget.List) {
 
 		flmi := LeftMenuItem{
 			RelayURL: chatRelay.Relay.URL,
-			RoomID:   "",
+			RoomID:   "/",
 		}
 		relayRoomsMenuData = append([]LeftMenuItem{flmi}, relayRoomsMenuData...)
 	}
@@ -383,7 +397,17 @@ func saveKey(value string) error {
 }
 
 func saveRelays() {
+	var urls = make([]string, 0)
+	for _, chatRelay := range chatRelays {
+		urls = append(urls, chatRelay.Relay.URL)
+	}
+	relaysStr := strings.Join(urls, ",")
+	a.Preferences().SetString(RELAYSKEY, relaysStr)
+}
 
+func getRelays() []string {
+	relaysStr := a.Preferences().String(RELAYSKEY)
+	return strings.Split(relaysStr, ",")
 }
 
 type ChatRelay struct {
