@@ -101,12 +101,14 @@ func main() {
 		func() fyne.CanvasObject {
 			return widget.NewLabel("template")
 		},
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			if relayRoomsMenuData[i].RoomID == "" {
-				o.(*widget.Label).SetText(relayRoomsMenuData[i].RelayURL)
-			} else {
-				o.(*widget.Label).SetText("    " + relayRoomsMenuData[i].RoomID)
-			}
+		func(i widget.ListItemID, o fyne.CanvasObject) { // CHECK out of index...
+            if len(relayRoomsMenuData) > i {
+			    if relayRoomsMenuData[i].RoomID == "" {
+				    o.(*widget.Label).SetText(relayRoomsMenuData[i].RelayURL)
+			    } else {
+				    o.(*widget.Label).SetText("    " + relayRoomsMenuData[i].RoomID)
+			    }
+            }
 		},
 	)
 
@@ -114,7 +116,7 @@ func main() {
 		selectedRelayUrl = relayRoomsMenuData[id].RelayURL
 		selectedRoomId = relayRoomsMenuData[id].RoomID
 		chatMessagesWidget.Refresh()
-		chatMessagesWidget.ScrollToBottom()
+		chatMessagesWidget.ScrollToBottom() // TODO: Probalby need to guard this. For instance if user has scrolled up, it shouldnt jump to bottom on its own
 	}
 
 	// Auto add the Nostr Relay
