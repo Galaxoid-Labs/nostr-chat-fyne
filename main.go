@@ -114,6 +114,10 @@ func main() {
 			if len(relayRoomsMenuData) > i {
 				if relayRoomsMenuData[i].RoomID == "/" {
 					o.(*widget.Label).SetText(relayRoomsMenuData[i].RelayURL)
+					o.(*widget.Label).TextStyle = fyne.TextStyle{
+						Bold:   true,
+						Italic: true,
+					}
 				} else {
 					o.(*widget.Label).SetText("    " + relayRoomsMenuData[i].RoomID)
 				}
@@ -173,8 +177,12 @@ func main() {
 			dialog.ShowForm("Add a New Room                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
 				widget.NewFormItem("Room Name", entry),
 			}, func(b bool) {
-				if entry.Text != "" || entry.Text != "/" {
-					addRoom(entry.Text, relayRoomsWidget)
+				var room = entry.Text
+				if room != "" {
+					if !strings.HasPrefix(room, "/") {
+						room = "/" + room
+					}
+					addRoom(room, relayRoomsWidget)
 				}
 			}, w)
 		}),
@@ -265,7 +273,8 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 		ctx := context.Background()
 		relay, err := nostr.RelayConnect(ctx, relayURL)
 		if err != nil {
-			panic(err)
+			fmt.Println("Err connecting to: ", relayURL)
+			return
 		}
 
 		chatRelay := &ChatRelay{
