@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"image/color"
+	"sort"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -12,8 +15,6 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
 	"golang.org/x/net/context"
-	"image/color"
-	"sort"
 )
 
 var baseSize = fyne.Size{Width: 900, Height: 640}
@@ -31,7 +32,8 @@ func main() {
 	w.Resize(baseSize)
 
 	// Setup the right side of the window
-	chatMessagesWidget := widget.NewList(
+    var chatMessagesWidget *widget.List;
+	chatMessagesWidget = widget.NewList(
 		func() int {
 			if room, ok := chatRelays[selectedRelayUrl].Rooms[selectedRoomId]; ok {
 				return len(room.ChatMessages)
@@ -47,25 +49,26 @@ func main() {
 
 			message := widget.NewLabel("template")
 			message.Alignment = fyne.TextAlignLeading
+            message.Wrapping = fyne.TextWrapWord
 
-			box := container.NewHBox()
-			box.Add(pubKey)
-			box.Add(message)
+            vbx := container.NewVBox(container.NewPadded(pubKey))
+            border := container.NewBorder(nil, nil, vbx, nil, message)
 
-			return box
+			return border
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			if room, ok := chatRelays[selectedRelayUrl].Rooms[selectedRoomId]; ok {
 				var chatMessage = room.ChatMessages[i]
 				pubKey := fmt.Sprintf("[ %s ]", chatMessage.PubKey[len(chatMessage.PubKey)-8:])
 				message := chatMessage.Content
-				o.(*fyne.Container).Objects[0].(*canvas.Text).Text = pubKey
-				o.(*fyne.Container).Objects[1].(*widget.Label).SetText(message)
+				o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Text).Text = pubKey
+				o.(*fyne.Container).Objects[0].(*widget.Label).SetText(message)
+                chatMessagesWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
 			}
 		},
 	)
 
-	inputWidget := widget.NewEntry()
+	inputWidget := widget.NewMultiLineEntry()
 	inputWidget.SetPlaceHolder("Say something...")
 	inputWidget.OnSubmitted = func(s string) {
 		go func() {
@@ -115,9 +118,9 @@ func main() {
 	}
 
 	// Auto add the Nostr Relay
-	// go func() {
-	// 	addRelay("wss://groups.nostr.com/nostr", relayRoomsWidget, chatMessagesWidget)
-	// }()
+	go func() {
+		addRelay("wss://groups.nostr.com/nostr", relayRoomsWidget, chatMessagesWidget)
+	}()
 
 	toolbar := widget.NewToolbar(
 		widget.NewToolbarAction(theme.AccountIcon(), func() {
