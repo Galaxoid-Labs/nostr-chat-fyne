@@ -2,7 +2,7 @@
 
 An experimental chat client written with Fyne. Its a work in progress based on kind 9 ideas
 
-![alt text](screenshots/ss.png)
+![alt text](screenshots/ss-1.png)
 
 This is very early implementation. Use at your own risk!
 
