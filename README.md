@@ -1,9 +1,23 @@
 # nostr-chat-fyne
+
 An experimental chat client written with Fyne. Its a work in progress based on kind 9 ideas
 
 This is very early implementation. Use at your own risk!
 
-Once you've got it runing:
+## Setup your dev environment
+
+- Golang
+- [Fyne Prerequisites](https://developer.fyne.io/started/#prerequisites)
+- Clone repo
+
+```
+go mod tidy
+go run .
+```
+
+Important! It will take quite a bit of time to complie the first time as its compiling some C libraries. Please be patient. After first compile, it will work normally.
+
+### After running
 
 - Add your nsec
 - Add kind9 relay exmaple: wss://groups.nostr.com/nostr
