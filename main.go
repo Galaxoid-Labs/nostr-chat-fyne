@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"sort"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -14,25 +15,30 @@ import (
 	"fyne.io/fyne/v2/widget"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
+	"github.com/zalando/go-keyring"
 	"golang.org/x/net/context"
 )
 
+const APPID = "com.galaxoidlabs.nostrchat"
+const USERKEY = "userkey"
+
 var baseSize = fyne.Size{Width: 900, Height: 640}
-var nsec = ""
 
 var chatRelays = make(map[string]ChatRelay, 0)
 var relayRoomsMenuData = make([]LeftMenuItem, 0)
 var selectedRelayUrl = ""
 var selectedRoomId = ""
+var a fyne.App
+var w fyne.Window
 
 func main() {
 
-	a := app.New()
-	w := a.NewWindow("Nostr Chat")
+	a = app.NewWithID(APPID)
+	w = a.NewWindow("Nostr Chat")
 	w.Resize(baseSize)
 
 	// Setup the right side of the window
-    var chatMessagesWidget *widget.List;
+	var chatMessagesWidget *widget.List
 	chatMessagesWidget = widget.NewList(
 		func() int {
 			if room, ok := chatRelays[selectedRelayUrl].Rooms[selectedRoomId]; ok {
@@ -49,10 +55,10 @@ func main() {
 
 			message := widget.NewLabel("template")
 			message.Alignment = fyne.TextAlignLeading
-            message.Wrapping = fyne.TextWrapWord
+			message.Wrapping = fyne.TextWrapWord
 
-            vbx := container.NewVBox(container.NewPadded(pubKey))
-            border := container.NewBorder(nil, nil, vbx, nil, message)
+			vbx := container.NewVBox(container.NewPadded(pubKey))
+			border := container.NewBorder(nil, nil, vbx, nil, message)
 
 			return border
 		},
@@ -63,12 +69,13 @@ func main() {
 				message := chatMessage.Content
 				o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Text).Text = pubKey
 				o.(*fyne.Container).Objects[0].(*widget.Label).SetText(message)
-                chatMessagesWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
+				chatMessagesWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
 			}
 		},
 	)
 
 	inputWidget := widget.NewMultiLineEntry()
+	inputWidget.Wrapping = fyne.TextWrapWord
 	inputWidget.SetPlaceHolder("Say something...")
 	inputWidget.OnSubmitted = func(s string) {
 		go func() {
@@ -102,13 +109,13 @@ func main() {
 			return widget.NewLabel("template")
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) { // CHECK out of index...
-            if len(relayRoomsMenuData) > i {
-			    if relayRoomsMenuData[i].RoomID == "" {
-				    o.(*widget.Label).SetText(relayRoomsMenuData[i].RelayURL)
-			    } else {
-				    o.(*widget.Label).SetText("    " + relayRoomsMenuData[i].RoomID)
-			    }
-            }
+			if len(relayRoomsMenuData) > i {
+				if relayRoomsMenuData[i].RoomID == "" {
+					o.(*widget.Label).SetText(relayRoomsMenuData[i].RelayURL)
+				} else {
+					o.(*widget.Label).SetText("    " + relayRoomsMenuData[i].RoomID)
+				}
+			}
 		},
 	)
 
@@ -132,7 +139,10 @@ func main() {
 				widget.NewFormItem("Private Key", entry),
 			}, func(b bool) {
 				if entry.Text != "" {
-					nsec = entry.Text // TODO: Validate
+					err := saveKey(entry.Text) // TODO: Handle Error
+					if err != nil {
+						fmt.Println("Err saving key: ", err)
+					}
 				}
 			}, w)
 		}),
@@ -168,7 +178,7 @@ func main() {
 
 	split := container.NewHSplit(leftSide, rightSide)
 
-	split.Offset = 0.4
+	split.Offset = 0.35
 	w.SetContent(split)
 	w.ShowAndRun()
 
@@ -194,15 +204,23 @@ func addRoom(roomID string, relayList *widget.List) {
 	}
 }
 
-func publishChat(message string) {
-	if nsec == "" {
-		return // TODO: Validate
+func publishChat(message string) error {
+	hex, err := keyring.Get(APPID, USERKEY)
+	if err != nil {
+		fmt.Print(err)
+		return err
 	}
-	_, hex, err := nip19.Decode(nsec)
-	publicKey, err := nostr.GetPublicKey(hex.(string))
 
 	if err != nil {
-		return // TODO: Handle error
+		fmt.Print(err)
+		return err
+	}
+
+	publicKey, err := nostr.GetPublicKey(hex)
+
+	if err != nil {
+		fmt.Print(err)
+		return err
 	}
 
 	for _, chatRelay := range chatRelays {
@@ -212,19 +230,21 @@ func publishChat(message string) {
 				PubKey:    publicKey,
 				CreatedAt: nostr.Now(),
 				Kind:      9,
-				Tags:      nostr.Tags{nostr.Tag{"r", selectedRoomId}},
+				Tags:      nostr.Tags{nostr.Tag{"g", selectedRoomId}},
 				Content:   message,
 			}
-			err = ev.Sign(hex.(string))
+			err = ev.Sign(hex)
 			if err != nil {
 				panic(err)
 			}
 
 			ctx := context.Background()
 			chatRelay.Relay.Publish(ctx, ev)
-			return
+			return nil
 		}
 	}
+
+	return nil
 }
 
 func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget *widget.List) {
@@ -254,8 +274,7 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 		relayRoomsWidget.Refresh()
 		relayRoomsWidget.Select(len(relayRoomsMenuData) - 1)
 
-		var filters nostr.Filters
-		filters = []nostr.Filter{{
+		filters := []nostr.Filter{{
 			Kinds: []int{9},
 		}}
 
@@ -269,7 +288,7 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 			if ev.Kind == 9 {
 
 				for _, tag := range ev.Tags {
-					if tag.Key() == "r" {
+					if tag.Key() == "g" {
 
 						cm := ChatMessage{
 							ID:        ev.ID,
@@ -308,7 +327,6 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 		}
 
 	}
-
 }
 
 func updateLeftMenuList(relayList *widget.List) {
@@ -335,6 +353,37 @@ func updateLeftMenuList(relayList *widget.List) {
 	}
 
 	relayList.Refresh()
+}
+
+func saveKey(value string) error {
+	if strings.HasPrefix(value, "nsec") {
+		_, hex, err := nip19.Decode(value)
+		if err != nil {
+			return err
+		}
+
+		err = keyring.Set(APPID, USERKEY, hex.(string))
+		if err != nil {
+			return err
+		}
+	} else {
+		publicKey, err := nostr.GetPublicKey(value)
+		if err != nil {
+			return err
+		}
+		if nostr.IsValidPublicKeyHex(publicKey) {
+			err = keyring.Set(APPID, USERKEY, value)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func saveRelays() {
+
 }
 
 type ChatRelay struct {
