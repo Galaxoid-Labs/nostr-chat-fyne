@@ -172,7 +172,9 @@ func main() {
 					if !strings.HasPrefix(room, "/") {
 						room = "/" + room
 					}
-					addGroup(room, relaysWidgetList)
+					go func() {
+						addGroup(room, relaysWidgetList, chatMessagesListWidget)
+					}()
 				}
 			}, w)
 		}),
@@ -217,7 +219,7 @@ func main() {
 
 }
 
-func addGroup(groupName string, relayList *widget.List) {
+func addGroup(groupName string, relaysWidgetList *widget.List, chatMessagesListWidget *widget.List) {
 	if selectedRelayUrl == "" { // TODO: Better handling...
 		return
 	}
@@ -228,15 +230,81 @@ func addGroup(groupName string, relayList *widget.List) {
 			Name:         groupName,
 			ChatMessages: make([]ChatMessage, 0),
 		}
-		updateLeftMenuList(relayList)
+
+		filters := []nostr.Filter{{
+			Kinds: []int{9},
+			Tags: nostr.TagMap{
+				"g": {groupName},
+			},
+		}}
+		ctx := context.Background()
+
+		chatRelay := relays[selectedRelayUrl]
+
+		sub, err := chatRelay.Relay.Subscribe(ctx, filters)
+		if err != nil {
+			panic(err)
+		}
+
+		chatRelay.Subscriptions[groupName] = *sub
+		relays[selectedRelayUrl] = chatRelay
+
+		fmt.Println(relays[selectedRelayUrl].Subscriptions)
+
+		// Save relay
+		saveRelays()
+
+		updateLeftMenuList(relaysWidgetList)
 
 		for idx, menuItem := range relayMenuData {
 			if menuItem.GroupName == groupName {
-				relayList.Select(idx)
+				relaysWidgetList.Select(idx)
 				break
 			}
 		}
 
+		for ev := range sub.Events {
+
+			if ev.Kind == 9 {
+
+				for _, tag := range ev.Tags {
+					if tag.Key() == "g" {
+
+						cm := ChatMessage{
+							ID:        ev.ID,
+							PubKey:    ev.PubKey,
+							CreatedAt: ev.CreatedAt,
+							Content:   ev.Content,
+						}
+
+						if group, ok := relays[sub.Relay.URL].Groups[tag.Value()]; ok {
+
+							group.ChatMessages = append(group.ChatMessages, cm)
+							sort.Slice(group.ChatMessages, func(i, j int) bool {
+								return group.ChatMessages[i].CreatedAt < group.ChatMessages[j].CreatedAt
+							})
+							relays[sub.Relay.URL].Groups[tag.Value()] = group
+
+						} else {
+
+							relays[sub.Relay.URL].Groups[tag.Value()] = ChatGroup{
+								Name:         tag.Value(),
+								ChatMessages: []ChatMessage{cm},
+							}
+
+						}
+
+					}
+
+				}
+
+				chatMessagesListWidget.Refresh()
+				chatMessagesListWidget.ScrollToBottom()
+
+				updateLeftMenuList(relaysWidgetList)
+
+			}
+		}
 	}
 }
 
@@ -299,12 +367,13 @@ func addRelay(relayURL string, relaysWidgetList *widget.List, chatMessagesListWi
 		}
 
 		chatRelay := &ChatRelay{
-			Relay:  *relay,
-			Groups: make(map[string]ChatGroup, 0),
+			Relay:         *relay,
+			Subscriptions: make(map[string]nostr.Subscription, 0),
+			Groups:        make(map[string]ChatGroup, 0),
 		}
 
 		relays[relayURL] = *chatRelay
-		selectedRelayUrl = relayURL
+		//selectedRelayUrl = relayURL
 
 		lmi := LeftMenuItem{
 			RelayURL:  chatRelay.Relay.URL,
@@ -317,12 +386,18 @@ func addRelay(relayURL string, relaysWidgetList *widget.List, chatMessagesListWi
 
 		filters := []nostr.Filter{{
 			Kinds: []int{9},
+			Tags: nostr.TagMap{
+				"g": {"/"},
+			},
 		}}
 
 		sub, err := relay.Subscribe(ctx, filters)
 		if err != nil {
 			panic(err)
 		}
+
+		chatRelay.Subscriptions["/"] = *sub
+		relays[relayURL] = *chatRelay
 
 		// Save relay
 		saveRelays()
@@ -441,8 +516,9 @@ func getRelays() []string {
 }
 
 type ChatRelay struct {
-	Relay  nostr.Relay
-	Groups map[string]ChatGroup
+	Relay         nostr.Relay
+	Subscriptions map[string]nostr.Subscription
+	Groups        map[string]ChatGroup
 }
 
 type ChatGroup struct {
