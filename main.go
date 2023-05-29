@@ -26,10 +26,10 @@ const RELAYSKEY = "relayskey"
 
 var baseSize = fyne.Size{Width: 900, Height: 640}
 
-var chatRelays = make(map[string]ChatRelay, 0)
-var relayRoomsMenuData = make([]LeftMenuItem, 0)
+var relays = make(map[string]ChatRelay, 0)
+var relayMenuData = make([]LeftMenuItem, 0)
 var selectedRelayUrl = ""
-var selectedRoomId = "/"
+var selectedGroupName = "/"
 var a fyne.App
 var w fyne.Window
 
@@ -40,10 +40,10 @@ func main() {
 	w.Resize(baseSize)
 
 	// Setup the right side of the window
-	var chatMessagesWidget *widget.List
-	chatMessagesWidget = widget.NewList(
+	var chatMessagesListWidget *widget.List
+	chatMessagesListWidget = widget.NewList(
 		func() int {
-			if room, ok := chatRelays[selectedRelayUrl].Rooms[selectedRoomId]; ok {
+			if room, ok := relays[selectedRelayUrl].Groups[selectedGroupName]; ok {
 				return len(room.ChatMessages)
 			} else {
 				return 0
@@ -65,84 +65,74 @@ func main() {
 			return border
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
-			if room, ok := chatRelays[selectedRelayUrl].Rooms[selectedRoomId]; ok {
+			if room, ok := relays[selectedRelayUrl].Groups[selectedGroupName]; ok {
 				var chatMessage = room.ChatMessages[i]
 				pubKey := fmt.Sprintf("[ %s ]", chatMessage.PubKey[len(chatMessage.PubKey)-8:])
 				message := chatMessage.Content
 				o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Text).Text = pubKey
 				o.(*fyne.Container).Objects[0].(*widget.Label).SetText(message)
-				chatMessagesWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
+				chatMessagesListWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
 			}
 		},
 	)
 
-	inputWidget := widget.NewMultiLineEntry()
-	inputWidget.Wrapping = fyne.TextWrapWord
-	inputWidget.SetPlaceHolder("Say something...")
-	inputWidget.OnSubmitted = func(s string) {
+	chatInputWidget := widget.NewMultiLineEntry()
+	chatInputWidget.Wrapping = fyne.TextWrapWord
+	chatInputWidget.SetPlaceHolder("Say something...")
+	chatInputWidget.OnSubmitted = func(s string) {
 		go func() {
 			if s == "" {
 				return
 			}
-			inputWidget.SetText("")
+			chatInputWidget.SetText("")
 			publishChat(s)
 		}()
 	}
 
-	submitButton := widget.NewButton("Submit", func() {
-		message := inputWidget.Text
+	submitChatButtonWidget := widget.NewButton("Submit", func() {
+		message := chatInputWidget.Text
 		if message == "" {
 			return
 		}
 		go func() {
-			inputWidget.SetText("")
+			chatInputWidget.SetText("")
 			publishChat(message)
 		}()
 	})
 
-	bottomBox := container.NewBorder(nil, nil, nil, submitButton, inputWidget)
+	bottomBorderContainer := container.NewBorder(nil, nil, nil, submitChatButtonWidget, chatInputWidget)
 
 	// Setup the left side of the window
-	relayRoomsWidget := widget.NewList(
+	relaysWidgetList := widget.NewList(
 		func() int {
-			return len(relayRoomsMenuData)
+			return len(relayMenuData)
 		},
 		func() fyne.CanvasObject {
 			return widget.NewLabel("template")
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) { // CHECK out of index...
-			if len(relayRoomsMenuData) > i {
-				if relayRoomsMenuData[i].RoomID == "/" {
-					o.(*widget.Label).SetText(relayRoomsMenuData[i].RelayURL)
+			if len(relayMenuData) > i {
+				if relayMenuData[i].GroupName == "/" {
+					o.(*widget.Label).SetText(relayMenuData[i].RelayURL)
 					o.(*widget.Label).TextStyle = fyne.TextStyle{
 						Bold:   true,
 						Italic: true,
 					}
 				} else {
-					o.(*widget.Label).SetText("    " + relayRoomsMenuData[i].RoomID)
+					o.(*widget.Label).SetText("    " + relayMenuData[i].GroupName)
 				}
 			}
 		},
 	)
 
-	relayRoomsWidget.OnSelected = func(id widget.ListItemID) {
-		selectedRelayUrl = relayRoomsMenuData[id].RelayURL
-		selectedRoomId = relayRoomsMenuData[id].RoomID
-		chatMessagesWidget.Refresh()
-		chatMessagesWidget.ScrollToBottom() // TODO: Probalby need to guard this. For instance if user has scrolled up, it shouldnt jump to bottom on its own
+	relaysWidgetList.OnSelected = func(id widget.ListItemID) {
+		selectedRelayUrl = relayMenuData[id].RelayURL
+		selectedGroupName = relayMenuData[id].GroupName
+		chatMessagesListWidget.Refresh()
+		chatMessagesListWidget.ScrollToBottom() // TODO: Probalby need to guard this. For instance if user has scrolled up, it shouldnt jump to bottom on its own
 	}
 
-	// Auto add the Nostr Relay
-	go func() {
-		relays := getRelays()
-		for _, relay := range relays {
-			if relay != "" { // TODO: Better relay validation
-				addRelay(relay, relayRoomsWidget, chatMessagesWidget)
-			}
-		}
-	}()
-
-	toolbar := widget.NewToolbar(
+	relaysBottomToolbarWidget := widget.NewToolbar(
 		widget.NewToolbarAction(theme.AccountIcon(), func() {
 			var entry = widget.NewEntry()
 			entry.SetPlaceHolder("nsec1...")
@@ -166,7 +156,7 @@ func main() {
 			}, func(b bool) {
 				if entry.Text != "" {
 					go func() {
-						addRelay(entry.Text, relayRoomsWidget, chatMessagesWidget)
+						addRelay(entry.Text, relaysWidgetList, chatMessagesListWidget)
 					}()
 				}
 			}, w)
@@ -182,23 +172,23 @@ func main() {
 					if !strings.HasPrefix(room, "/") {
 						room = "/" + room
 					}
-					addRoom(room, relayRoomsWidget)
+					addGroup(room, relaysWidgetList)
 				}
 			}, w)
 		}),
 		widget.NewToolbarAction(theme.DeleteIcon(), func() {
 			dialog.NewConfirm("Reset local data?", "This will remove all relays and your private key.", func(b bool) {
 				if b {
-					chatRelays = nil
-					for _, chatRelay := range chatRelays {
+					relays = nil
+					for _, chatRelay := range relays {
 						chatRelay.Relay.Close()
 					}
 
-					chatRelays = nil
-					relayRoomsMenuData = nil
+					relays = nil
+					relayMenuData = nil
 					a.Preferences().RemoveValue(RELAYSKEY)
-					relayRoomsWidget.Refresh()
-					chatMessagesWidget.Refresh()
+					relaysWidgetList.Refresh()
+					chatMessagesListWidget.Refresh()
 
 					keyring.Delete(APPID, USERKEY)
 				}
@@ -206,32 +196,42 @@ func main() {
 		}),
 	)
 
-	leftSide := container.NewBorder(nil, container.NewPadded(toolbar), nil, nil, container.NewPadded(relayRoomsWidget))
-	rightSide := container.NewBorder(nil, container.NewPadded(bottomBox), nil, nil, container.NewPadded(chatMessagesWidget))
+	leftBorderContainer := container.NewBorder(nil, container.NewPadded(relaysBottomToolbarWidget), nil, nil, container.NewPadded(relaysWidgetList))
+	rightBorderContainer := container.NewBorder(nil, container.NewPadded(bottomBorderContainer), nil, nil, container.NewPadded(chatMessagesListWidget))
 
-	split := container.NewHSplit(leftSide, rightSide)
+	splitContainer := container.NewHSplit(leftBorderContainer, rightBorderContainer)
+	splitContainer.Offset = 0.35
 
-	split.Offset = 0.35
-	w.SetContent(split)
+	w.SetContent(splitContainer)
+
+	go func() {
+		relays := getRelays()
+		for _, relay := range relays {
+			if relay != "" { // TODO: Better relay validation
+				addRelay(relay, relaysWidgetList, chatMessagesListWidget)
+			}
+		}
+	}()
+
 	w.ShowAndRun()
 
 }
 
-func addRoom(roomID string, relayList *widget.List) {
+func addGroup(groupName string, relayList *widget.List) {
 	if selectedRelayUrl == "" { // TODO: Better handling...
 		return
 	}
-	if _, ok := chatRelays[selectedRelayUrl].Rooms[roomID]; ok {
+	if _, ok := relays[selectedRelayUrl].Groups[groupName]; ok {
 		return
 	} else {
-		chatRelays[selectedRelayUrl].Rooms[roomID] = ChatRoom{
-			ID:           roomID,
+		relays[selectedRelayUrl].Groups[groupName] = ChatGroup{
+			Name:         groupName,
 			ChatMessages: make([]ChatMessage, 0),
 		}
 		updateLeftMenuList(relayList)
 
-		for idx, menuItem := range relayRoomsMenuData {
-			if menuItem.RoomID == roomID {
+		for idx, menuItem := range relayMenuData {
+			if menuItem.GroupName == groupName {
 				relayList.Select(idx)
 				break
 			}
@@ -259,7 +259,7 @@ func publishChat(message string) error {
 		return err
 	}
 
-	for _, chatRelay := range chatRelays {
+	for _, chatRelay := range relays {
 		if chatRelay.Relay.URL == selectedRelayUrl {
 			fmt.Println("Publishing to", chatRelay.Relay.URL)
 			u, err := url.Parse(chatRelay.Relay.URL)
@@ -270,7 +270,7 @@ func publishChat(message string) error {
 				PubKey:    publicKey,
 				CreatedAt: nostr.Now(),
 				Kind:      9,
-				Tags:      nostr.Tags{nostr.Tag{"g", selectedRoomId, u.Host}},
+				Tags:      nostr.Tags{nostr.Tag{"g", selectedGroupName, u.Host}},
 				Content:   message,
 			}
 			err = ev.Sign(hex)
@@ -287,8 +287,8 @@ func publishChat(message string) error {
 	return nil
 }
 
-func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget *widget.List) {
-	if _, ok := chatRelays[relayURL]; ok {
+func addRelay(relayURL string, relaysWidgetList *widget.List, chatMessagesListWidget *widget.List) {
+	if _, ok := relays[relayURL]; ok {
 		return
 	} else {
 		ctx := context.Background()
@@ -299,21 +299,21 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 		}
 
 		chatRelay := &ChatRelay{
-			Relay: *relay,
-			Rooms: make(map[string]ChatRoom, 0),
+			Relay:  *relay,
+			Groups: make(map[string]ChatGroup, 0),
 		}
 
-		chatRelays[relayURL] = *chatRelay
+		relays[relayURL] = *chatRelay
 		selectedRelayUrl = relayURL
 
 		lmi := LeftMenuItem{
-			RelayURL: chatRelay.Relay.URL,
-			RoomID:   "/",
+			RelayURL:  chatRelay.Relay.URL,
+			GroupName: "/",
 		}
 
-		relayRoomsMenuData = append(relayRoomsMenuData, lmi)
-		relayRoomsWidget.Refresh()
-		relayRoomsWidget.Select(len(relayRoomsMenuData) - 1)
+		relayMenuData = append(relayMenuData, lmi)
+		relaysWidgetList.Refresh()
+		relaysWidgetList.Select(len(relayMenuData) - 1)
 
 		filters := []nostr.Filter{{
 			Kinds: []int{9},
@@ -341,18 +341,18 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 							Content:   ev.Content,
 						}
 
-						if room, ok := chatRelays[sub.Relay.URL].Rooms[tag.Value()]; ok {
+						if group, ok := relays[sub.Relay.URL].Groups[tag.Value()]; ok {
 
-							room.ChatMessages = append(room.ChatMessages, cm)
-							sort.Slice(room.ChatMessages, func(i, j int) bool {
-								return room.ChatMessages[i].CreatedAt < room.ChatMessages[j].CreatedAt
+							group.ChatMessages = append(group.ChatMessages, cm)
+							sort.Slice(group.ChatMessages, func(i, j int) bool {
+								return group.ChatMessages[i].CreatedAt < group.ChatMessages[j].CreatedAt
 							})
-							chatRelays[sub.Relay.URL].Rooms[tag.Value()] = room
+							relays[sub.Relay.URL].Groups[tag.Value()] = group
 
 						} else {
 
-							chatRelays[sub.Relay.URL].Rooms[tag.Value()] = ChatRoom{
-								ID:           tag.Value(),
+							relays[sub.Relay.URL].Groups[tag.Value()] = ChatGroup{
+								Name:         tag.Value(),
 								ChatMessages: []ChatMessage{cm},
 							}
 
@@ -362,10 +362,10 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 
 				}
 
-				chatMessagesWidget.Refresh()
-				chatMessagesWidget.ScrollToBottom()
+				chatMessagesListWidget.Refresh()
+				chatMessagesListWidget.ScrollToBottom()
 
-				updateLeftMenuList(relayRoomsWidget)
+				updateLeftMenuList(relaysWidgetList)
 
 			}
 		}
@@ -373,30 +373,30 @@ func addRelay(relayURL string, relayRoomsWidget *widget.List, chatMessagesWidget
 	}
 }
 
-func updateLeftMenuList(relayList *widget.List) {
-	relayRoomsMenuData = make([]LeftMenuItem, 0)
+func updateLeftMenuList(relaysWidgetList *widget.List) {
+	relayMenuData = make([]LeftMenuItem, 0)
 
-	for _, chatRelay := range chatRelays {
+	for _, chatRelay := range relays {
 
-		for _, room := range chatRelay.Rooms {
-			if room.ID != "/" {
+		for _, group := range chatRelay.Groups {
+			if group.Name != "/" {
 				lmi := LeftMenuItem{
-					RelayURL: chatRelay.Relay.URL,
-					RoomID:   room.ID,
+					RelayURL:  chatRelay.Relay.URL,
+					GroupName: group.Name,
 				}
-				relayRoomsMenuData = append(relayRoomsMenuData, lmi)
+				relayMenuData = append(relayMenuData, lmi)
 			}
 
 		}
 
 		flmi := LeftMenuItem{
-			RelayURL: chatRelay.Relay.URL,
-			RoomID:   "/",
+			RelayURL:  chatRelay.Relay.URL,
+			GroupName: "/",
 		}
-		relayRoomsMenuData = append([]LeftMenuItem{flmi}, relayRoomsMenuData...)
+		relayMenuData = append([]LeftMenuItem{flmi}, relayMenuData...)
 	}
 
-	relayList.Refresh()
+	relaysWidgetList.Refresh()
 }
 
 func saveKey(value string) error {
@@ -428,7 +428,7 @@ func saveKey(value string) error {
 
 func saveRelays() {
 	var urls = make([]string, 0)
-	for _, chatRelay := range chatRelays {
+	for _, chatRelay := range relays {
 		urls = append(urls, chatRelay.Relay.URL)
 	}
 	relaysStr := strings.Join(urls, ",")
@@ -441,12 +441,12 @@ func getRelays() []string {
 }
 
 type ChatRelay struct {
-	Relay nostr.Relay
-	Rooms map[string]ChatRoom
+	Relay  nostr.Relay
+	Groups map[string]ChatGroup
 }
 
-type ChatRoom struct {
-	ID           string        `json:"id"`
+type ChatGroup struct {
+	Name         string        `json:"name"`
 	ChatMessages []ChatMessage `json:"chat_messages"`
 }
 
@@ -458,6 +458,6 @@ type ChatMessage struct {
 }
 
 type LeftMenuItem struct {
-	RelayURL string
-	RoomID   string
+	RelayURL  string
+	GroupName string
 }
