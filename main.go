@@ -170,7 +170,7 @@ func main() {
 			dialog.ShowForm("Import a Nostr Private Key                                             ", "Import", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
 				widget.NewFormItem("Private Key", entry),
 			}, func(b bool) {
-				if entry.Text != "" {
+				if entry.Text != "" && b {
 					err := saveKey(entry.Text) // TODO: Handle Error
 					if err != nil {
 						fmt.Println("Err saving key: ", err)
@@ -241,7 +241,7 @@ func addRelayDialog(relaysWidgetList *widget.List, chatMessagesListWidget *widge
 	dialog.ShowForm("Add Relay                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
 		widget.NewFormItem("URL", entry),
 	}, func(b bool) {
-		if entry.Text != "" {
+		if entry.Text != "" && b {
 			go func() {
 				addRelay(entry.Text, relaysWidgetList, chatMessagesListWidget)
 			}()
