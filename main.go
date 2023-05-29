@@ -218,6 +218,9 @@ func main() {
 }
 
 func addRoom(roomID string, relayList *widget.List) {
+	if selectedRelayUrl == "" { // TODO: Better handling...
+		return
+	}
 	if _, ok := chatRelays[selectedRelayUrl].Rooms[roomID]; ok {
 		return
 	} else {
