@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/nbd-wtf/go-nostr"
@@ -21,6 +22,7 @@ import (
 )
 
 const APPID = "com.galaxoidlabs.nostrchat"
+const APP_TITLE = "Nostr Chat"
 const USERKEY = "userkey"
 const RELAYSKEY = "relayskey"
 
@@ -30,13 +32,16 @@ var relays = make(map[string]ChatRelay, 0)
 var relayMenuData = make([]LeftMenuItem, 0)
 var selectedRelayUrl = ""
 var selectedGroupName = "/"
+
 var a fyne.App
 var w fyne.Window
+
+var emptyRelayListOverlay *fyne.Container
 
 func main() {
 
 	a = app.NewWithID(APPID)
-	w = a.NewWindow("Nostr Chat")
+	w = a.NewWindow(APP_TITLE)
 	w.Resize(baseSize)
 
 	// Setup the right side of the window
@@ -103,29 +108,55 @@ func main() {
 	bottomBorderContainer := container.NewBorder(nil, nil, nil, submitChatButtonWidget, chatInputWidget)
 
 	// Setup the left side of the window
-	relaysWidgetList := widget.NewList(
+	var relaysListWidget *widget.List
+	relaysListWidget = widget.NewList(
 		func() int {
-			return len(relayMenuData)
+			l := len(relayMenuData)
+			if l > 0 {
+				hideEmptyRelayListOverlay()
+			} else {
+				showEmptyRelayListOverlay()
+			}
+			return l
 		},
 		func() fyne.CanvasObject {
-			return widget.NewLabel("template")
+			b := widget.NewButtonWithIcon("", theme.ContentAddIcon(), func() {
+				var entry = widget.NewEntry()
+				entry.SetPlaceHolder("ex: /pizza")
+				dialog.ShowForm("Add Group                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
+					widget.NewFormItem("Group Name", entry),
+				}, func(b bool) {
+					var group = entry.Text
+					if group != "" {
+						if !strings.HasPrefix(group, "/") {
+							group = "/" + group
+						}
+						go func() {
+							addGroup(group, relaysListWidget, chatMessagesListWidget)
+						}()
+					}
+				}, w)
+			})
+			return container.NewHBox(widget.NewLabel("template"), layout.NewSpacer(), b)
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) { // CHECK out of index...
 			if len(relayMenuData) > i {
 				if relayMenuData[i].GroupName == "/" {
-					o.(*widget.Label).SetText(relayMenuData[i].RelayURL)
-					o.(*widget.Label).TextStyle = fyne.TextStyle{
+					o.(*fyne.Container).Objects[0].(*widget.Label).SetText(relayMenuData[i].RelayURL)
+					o.(*fyne.Container).Objects[0].(*widget.Label).TextStyle = fyne.TextStyle{
 						Bold:   true,
 						Italic: true,
 					}
+					o.(*fyne.Container).Objects[2].Show()
 				} else {
-					o.(*widget.Label).SetText("    " + relayMenuData[i].GroupName)
+					o.(*fyne.Container).Objects[0].(*widget.Label).SetText("    " + relayMenuData[i].GroupName)
+					o.(*fyne.Container).Objects[2].Hide()
 				}
 			}
 		},
 	)
 
-	relaysWidgetList.OnSelected = func(id widget.ListItemID) {
+	relaysListWidget.OnSelected = func(id widget.ListItemID) {
 		selectedRelayUrl = relayMenuData[id].RelayURL
 		selectedGroupName = relayMenuData[id].GroupName
 		chatMessagesListWidget.Refresh()
@@ -149,34 +180,7 @@ func main() {
 		}),
 		widget.NewToolbarSpacer(),
 		widget.NewToolbarAction(theme.StorageIcon(), func() {
-			var entry = widget.NewEntry()
-			entry.SetPlaceHolder("Enter a Nostr Relay URL")
-			dialog.ShowForm("Add a Nostr Relay                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
-				widget.NewFormItem("URL", entry),
-			}, func(b bool) {
-				if entry.Text != "" {
-					go func() {
-						addRelay(entry.Text, relaysWidgetList, chatMessagesListWidget)
-					}()
-				}
-			}, w)
-		}),
-		widget.NewToolbarAction(theme.FolderNewIcon(), func() {
-			var entry = widget.NewEntry()
-			entry.SetPlaceHolder("")
-			dialog.ShowForm("Add a New Room                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
-				widget.NewFormItem("Room Name", entry),
-			}, func(b bool) {
-				var room = entry.Text
-				if room != "" {
-					if !strings.HasPrefix(room, "/") {
-						room = "/" + room
-					}
-					go func() {
-						addGroup(room, relaysWidgetList, chatMessagesListWidget)
-					}()
-				}
-			}, w)
+			addRelayDialog(relaysListWidget, chatMessagesListWidget)
 		}),
 		widget.NewToolbarAction(theme.DeleteIcon(), func() {
 			dialog.NewConfirm("Reset local data?", "This will remove all relays and your private key.", func(b bool) {
@@ -189,7 +193,7 @@ func main() {
 					relays = nil
 					relayMenuData = nil
 					a.Preferences().RemoveValue(RELAYSKEY)
-					relaysWidgetList.Refresh()
+					relaysListWidget.Refresh()
 					chatMessagesListWidget.Refresh()
 
 					keyring.Delete(APPID, USERKEY)
@@ -198,7 +202,11 @@ func main() {
 		}),
 	)
 
-	leftBorderContainer := container.NewBorder(nil, container.NewPadded(relaysBottomToolbarWidget), nil, nil, container.NewPadded(relaysWidgetList))
+	emptyRelayListOverlay = container.NewCenter(widget.NewButtonWithIcon("Add Relay", theme.StorageIcon(), func() {
+		addRelayDialog(relaysListWidget, chatMessagesListWidget)
+	}))
+
+	leftBorderContainer := container.NewBorder(nil, container.NewPadded(relaysBottomToolbarWidget), nil, nil, container.NewMax(container.NewPadded(relaysListWidget), emptyRelayListOverlay))
 	rightBorderContainer := container.NewBorder(nil, container.NewPadded(bottomBorderContainer), nil, nil, container.NewPadded(chatMessagesListWidget))
 
 	splitContainer := container.NewHSplit(leftBorderContainer, rightBorderContainer)
@@ -210,7 +218,7 @@ func main() {
 		relays := getRelays()
 		for _, relay := range relays {
 			if relay != "" { // TODO: Better relay validation
-				addRelay(relay, relaysWidgetList, chatMessagesListWidget)
+				addRelay(relay, relaysListWidget, chatMessagesListWidget)
 			}
 		}
 	}()
@@ -219,7 +227,29 @@ func main() {
 
 }
 
-func addGroup(groupName string, relaysWidgetList *widget.List, chatMessagesListWidget *widget.List) {
+func hideEmptyRelayListOverlay() {
+	emptyRelayListOverlay.Hide()
+}
+
+func showEmptyRelayListOverlay() {
+	emptyRelayListOverlay.Show()
+}
+
+func addRelayDialog(relaysWidgetList *widget.List, chatMessagesListWidget *widget.List) {
+	var entry = widget.NewEntry()
+	entry.SetPlaceHolder("wss://somerelay.com")
+	dialog.ShowForm("Add Relay                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
+		widget.NewFormItem("URL", entry),
+	}, func(b bool) {
+		if entry.Text != "" {
+			go func() {
+				addRelay(entry.Text, relaysWidgetList, chatMessagesListWidget)
+			}()
+		}
+	}, w)
+}
+
+func addGroup(groupName string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
 	if selectedRelayUrl == "" { // TODO: Better handling...
 		return
 	}
@@ -254,11 +284,11 @@ func addGroup(groupName string, relaysWidgetList *widget.List, chatMessagesListW
 		// Save relay
 		saveRelays()
 
-		updateLeftMenuList(relaysWidgetList)
+		updateLeftMenuList(relaysListWidget)
 
 		for idx, menuItem := range relayMenuData {
 			if menuItem.GroupName == groupName {
-				relaysWidgetList.Select(idx)
+				relaysListWidget.Select(idx)
 				break
 			}
 		}
@@ -301,7 +331,7 @@ func addGroup(groupName string, relaysWidgetList *widget.List, chatMessagesListW
 				chatMessagesListWidget.Refresh()
 				chatMessagesListWidget.ScrollToBottom()
 
-				updateLeftMenuList(relaysWidgetList)
+				updateLeftMenuList(relaysListWidget)
 
 			}
 		}
@@ -355,7 +385,7 @@ func publishChat(message string) error {
 	return nil
 }
 
-func addRelay(relayURL string, relaysWidgetList *widget.List, chatMessagesListWidget *widget.List) {
+func addRelay(relayURL string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
 	if _, ok := relays[relayURL]; ok {
 		return
 	} else {
@@ -381,8 +411,8 @@ func addRelay(relayURL string, relaysWidgetList *widget.List, chatMessagesListWi
 		}
 
 		relayMenuData = append(relayMenuData, lmi)
-		relaysWidgetList.Refresh()
-		relaysWidgetList.Select(len(relayMenuData) - 1)
+		relaysListWidget.Refresh()
+		relaysListWidget.Select(len(relayMenuData) - 1)
 
 		filters := []nostr.Filter{{
 			Kinds: []int{9},
@@ -440,7 +470,7 @@ func addRelay(relayURL string, relaysWidgetList *widget.List, chatMessagesListWi
 				chatMessagesListWidget.Refresh()
 				chatMessagesListWidget.ScrollToBottom()
 
-				updateLeftMenuList(relaysWidgetList)
+				updateLeftMenuList(relaysListWidget)
 
 			}
 		}
@@ -448,7 +478,7 @@ func addRelay(relayURL string, relaysWidgetList *widget.List, chatMessagesListWi
 	}
 }
 
-func updateLeftMenuList(relaysWidgetList *widget.List) {
+func updateLeftMenuList(relaysListWidget *widget.List) {
 	relayMenuData = make([]LeftMenuItem, 0)
 
 	for _, chatRelay := range relays {
@@ -471,7 +501,7 @@ func updateLeftMenuList(relaysWidgetList *widget.List) {
 		relayMenuData = append([]LeftMenuItem{flmi}, relayMenuData...)
 	}
 
-	relaysWidgetList.Refresh()
+	relaysListWidget.Refresh()
 }
 
 func saveKey(value string) error {
@@ -513,27 +543,4 @@ func saveRelays() {
 func getRelays() []string {
 	relaysStr := a.Preferences().String(RELAYSKEY)
 	return strings.Split(relaysStr, ",")
-}
-
-type ChatRelay struct {
-	Relay         nostr.Relay
-	Subscriptions map[string]nostr.Subscription
-	Groups        map[string]ChatGroup
-}
-
-type ChatGroup struct {
-	Name         string        `json:"name"`
-	ChatMessages []ChatMessage `json:"chat_messages"`
-}
-
-type ChatMessage struct {
-	ID        string          `json:"id"`
-	PubKey    string          `json:"pubkey"`
-	CreatedAt nostr.Timestamp `json:"created_at"`
-	Content   string          `json:"content"`
-}
-
-type LeftMenuItem struct {
-	RelayURL  string
-	GroupName string
 }
