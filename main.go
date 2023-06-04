@@ -17,14 +17,11 @@ import (
 	"fyne.io/fyne/v2/widget"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
-	"github.com/zalando/go-keyring"
 	"golang.org/x/net/context"
 )
 
 const (
-	APPID     = "com.galaxoidlabs.nostrchat"
 	APP_TITLE = "Nostr Chat"
-	USERKEY   = "userkey"
 	RELAYSKEY = "relayskey"
 )
 
@@ -40,6 +37,7 @@ var (
 var (
 	a fyne.App
 	w fyne.Window
+	k Keystore
 )
 
 var emptyRelayListOverlay *fyne.Container
@@ -48,6 +46,9 @@ func main() {
 	a = app.NewWithID(APPID)
 	w = a.NewWindow(APP_TITLE)
 	w.Resize(baseSize)
+
+	// Keystore might be using the native keyring or falling back to just a file with a key
+	k = startKeystore()
 
 	// Setup the right side of the window
 	var chatMessagesListWidget *widget.List
@@ -200,7 +201,7 @@ func main() {
 					relaysListWidget.Refresh()
 					chatMessagesListWidget.Refresh()
 
-					keyring.Delete(APPID, USERKEY)
+					k.Erase()
 				}
 			}, w).Show()
 		}),
@@ -338,23 +339,6 @@ func addGroup(groupName string, relaysListWidget *widget.List, chatMessagesListW
 }
 
 func publishChat(message string) error {
-	hex, err := keyring.Get(APPID, USERKEY)
-	if err != nil {
-		fmt.Print(err)
-		return err
-	}
-
-	if err != nil {
-		fmt.Print(err)
-		return err
-	}
-
-	publicKey, err := nostr.GetPublicKey(hex)
-	if err != nil {
-		fmt.Print(err)
-		return err
-	}
-
 	for _, chatRelay := range relays {
 		if chatRelay.Relay.URL == selectedRelayUrl {
 			fmt.Println("Publishing to", chatRelay.Relay.URL)
@@ -363,14 +347,12 @@ func publishChat(message string) error {
 				return err
 			}
 			ev := nostr.Event{
-				PubKey:    publicKey,
 				CreatedAt: nostr.Now(),
 				Kind:      9,
 				Tags:      nostr.Tags{nostr.Tag{"g", selectedGroupName, u.Host}},
 				Content:   message,
 			}
-			err = ev.Sign(hex)
-			if err != nil {
+			if err := k.Sign(&ev); err != nil {
 				panic(err)
 			}
 
@@ -504,7 +486,7 @@ func saveKey(value string) error {
 			return err
 		}
 
-		err = keyring.Set(APPID, USERKEY, hex.(string))
+		err = k.Save(hex.(string))
 		if err != nil {
 			return err
 		}
@@ -514,8 +496,7 @@ func saveKey(value string) error {
 			return err
 		}
 		if nostr.IsValidPublicKeyHex(publicKey) {
-			err = keyring.Set(APPID, USERKEY, value)
-			if err != nil {
+			if err := k.Save(value); err != nil {
 				return err
 			}
 		}
