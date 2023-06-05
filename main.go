@@ -241,7 +241,7 @@ func showEmptyRelayListOverlay() {
 
 func addRelayDialog(relaysWidgetList *widget.List, chatMessagesListWidget *widget.List) {
 	entry := widget.NewEntry()
-	entry.SetPlaceHolder("wss://somerelay.com")
+	entry.SetPlaceHolder("somerelay.com")
 	dialog.ShowForm("Add Relay                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
 		widget.NewFormItem("URL", entry),
 	}, func(b bool) {
@@ -366,6 +366,10 @@ func publishChat(message string) error {
 }
 
 func addRelay(relayURL string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
+	if !strings.HasPrefix(relayURL, "wss://") && !strings.HasPrefix(relayURL, "ws://") {
+		relayURL = "wss://" + relayURL
+	}
+
 	if _, ok := relays[relayURL]; ok {
 		return
 	} else {
