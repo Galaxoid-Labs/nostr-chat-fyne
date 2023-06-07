@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"image/color"
-	"net/url"
 	"sort"
 	"strings"
 
@@ -16,13 +15,13 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/nbd-wtf/go-nostr/nip19"
 	"golang.org/x/net/context"
 )
 
 const (
 	APP_TITLE = "Nostr Chat"
-	RELAYSKEY = "relayskey"
+	APPID     = "com.galaxoidlabs.nostrchat"
+	RELAYSKEY = "relays"
 )
 
 var baseSize = fyne.Size{Width: 900, Height: 640}
@@ -136,9 +135,7 @@ func main() {
 						if !strings.HasPrefix(group, "/") {
 							group = "/" + group
 						}
-						go func() {
-							addGroup(group, relaysListWidget, chatMessagesListWidget)
-						}()
+						addGroup(group, relaysListWidget, chatMessagesListWidget)
 					}
 				}, w)
 			})
@@ -222,8 +219,13 @@ func main() {
 	go func() {
 		relays := getRelays()
 		for _, relay := range relays {
-			if relay != "" { // TODO: Better relay validation
-				addRelay(relay, relaysListWidget, chatMessagesListWidget)
+			if relay.URL != "" { // TODO: Better relay validation
+				addRelay(relay.URL, relaysListWidget, chatMessagesListWidget)
+				fmt.Println("added", relay.URL, "have groups", relay.Groups)
+				for _, group := range relay.Groups {
+					fmt.Println("will add group", group)
+					addGroup(group, relaysListWidget, chatMessagesListWidget)
+				}
 			}
 		}
 	}()
@@ -246,14 +248,13 @@ func addRelayDialog(relaysWidgetList *widget.List, chatMessagesListWidget *widge
 		widget.NewFormItem("URL", entry),
 	}, func(b bool) {
 		if entry.Text != "" && b {
-			go func() {
-				addRelay(entry.Text, relaysWidgetList, chatMessagesListWidget)
-			}()
+			addRelay(entry.Text, relaysWidgetList, chatMessagesListWidget)
 		}
 	}, w)
 }
 
 func addGroup(groupName string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
+	fmt.Println(groupName)
 	if selectedRelayUrl == "" { // TODO: Better handling...
 		return
 	}
@@ -299,10 +300,8 @@ func addGroup(groupName string, relaysListWidget *widget.List, chatMessagesListW
 
 		for ev := range sub.Events {
 			if ev.Kind == 9 {
-
 				for _, tag := range ev.Tags {
 					if tag.Key() == "g" {
-
 						cm := ChatMessage{
 							ID:        ev.ID,
 							PubKey:    ev.PubKey,
@@ -311,20 +310,17 @@ func addGroup(groupName string, relaysListWidget *widget.List, chatMessagesListW
 						}
 
 						if group, ok := relays[sub.Relay.URL].Groups[tag.Value()]; ok {
-
 							group.ChatMessages = append(group.ChatMessages, cm)
 							sort.Slice(group.ChatMessages, func(i, j int) bool {
 								return group.ChatMessages[i].CreatedAt < group.ChatMessages[j].CreatedAt
 							})
 							relays[sub.Relay.URL].Groups[tag.Value()] = group
-
 						} else {
 							relays[sub.Relay.URL].Groups[tag.Value()] = ChatGroup{
 								Name:         tag.Value(),
 								ChatMessages: []ChatMessage{cm},
 							}
 						}
-
 					}
 				}
 
@@ -336,33 +332,6 @@ func addGroup(groupName string, relaysListWidget *widget.List, chatMessagesListW
 			}
 		}
 	}
-}
-
-func publishChat(message string) error {
-	for _, chatRelay := range relays {
-		if chatRelay.Relay.URL == selectedRelayUrl {
-			fmt.Println("Publishing to", chatRelay.Relay.URL)
-			u, err := url.Parse(chatRelay.Relay.URL)
-			if err != nil {
-				return err
-			}
-			ev := nostr.Event{
-				CreatedAt: nostr.Now(),
-				Kind:      9,
-				Tags:      nostr.Tags{nostr.Tag{"g", selectedGroupName, u.Host}},
-				Content:   message,
-			}
-			if err := k.Sign(&ev); err != nil {
-				panic(err)
-			}
-
-			ctx := context.Background()
-			chatRelay.Relay.Publish(ctx, ev)
-			return nil
-		}
-	}
-
-	return nil
 }
 
 func addRelay(relayURL string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
@@ -415,46 +384,6 @@ func addRelay(relayURL string, relaysListWidget *widget.List, chatMessagesListWi
 
 		// Save relay
 		saveRelays()
-
-		for ev := range sub.Events {
-			if ev.Kind == 9 {
-
-				for _, tag := range ev.Tags {
-					if tag.Key() == "g" {
-
-						cm := ChatMessage{
-							ID:        ev.ID,
-							PubKey:    ev.PubKey,
-							CreatedAt: ev.CreatedAt,
-							Content:   ev.Content,
-						}
-
-						if group, ok := relays[sub.Relay.URL].Groups[tag.Value()]; ok {
-
-							group.ChatMessages = append(group.ChatMessages, cm)
-							sort.Slice(group.ChatMessages, func(i, j int) bool {
-								return group.ChatMessages[i].CreatedAt < group.ChatMessages[j].CreatedAt
-							})
-							relays[sub.Relay.URL].Groups[tag.Value()] = group
-
-						} else {
-							relays[sub.Relay.URL].Groups[tag.Value()] = ChatGroup{
-								Name:         tag.Value(),
-								ChatMessages: []ChatMessage{cm},
-							}
-						}
-
-					}
-				}
-
-				chatMessagesListWidget.Refresh()
-				chatMessagesListWidget.ScrollToBottom()
-
-				updateLeftMenuList(relaysListWidget)
-
-			}
-		}
-
 	}
 }
 
@@ -481,44 +410,4 @@ func updateLeftMenuList(relaysListWidget *widget.List) {
 	}
 
 	relaysListWidget.Refresh()
-}
-
-func saveKey(value string) error {
-	if strings.HasPrefix(value, "nsec") {
-		_, hex, err := nip19.Decode(value)
-		if err != nil {
-			return err
-		}
-
-		err = k.Save(hex.(string))
-		if err != nil {
-			return err
-		}
-	} else {
-		publicKey, err := nostr.GetPublicKey(value)
-		if err != nil {
-			return err
-		}
-		if nostr.IsValidPublicKeyHex(publicKey) {
-			if err := k.Save(value); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func saveRelays() {
-	urls := make([]string, 0)
-	for _, chatRelay := range relays {
-		urls = append(urls, chatRelay.Relay.URL)
-	}
-	relaysStr := strings.Join(urls, ",")
-	a.Preferences().SetString(RELAYSKEY, relaysStr)
-}
-
-func getRelays() []string {
-	relaysStr := a.Preferences().String(RELAYSKEY)
-	return strings.Split(relaysStr, ",")
 }

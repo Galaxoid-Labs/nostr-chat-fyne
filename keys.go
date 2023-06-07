@@ -27,8 +27,7 @@ type Keystore interface {
 }
 
 const (
-	APPID   = "com.galaxoidlabs.nostrchat"
-	USERKEY = "userkey"
+	USERKEY = "key"
 )
 
 type KeyringStore struct{}
@@ -75,7 +74,7 @@ func (f FileKeystore) Save(key string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(path, "key"), keybin, 0600)
+	return os.WriteFile(filepath.Join(path, USERKEY), keybin, 0600)
 }
 
 func (f FileKeystore) Erase() error {
@@ -93,7 +92,7 @@ func (f FileKeystore) Sign(event *nostr.Event) error {
 		return err
 	}
 
-	file := filepath.Join(path, "key")
+	file := filepath.Join(path, USERKEY)
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return fmt.Errorf("failed to read key from file (%s): %w", file, err)

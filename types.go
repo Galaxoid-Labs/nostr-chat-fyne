@@ -24,3 +24,8 @@ type LeftMenuItem struct {
 	RelayURL  string `json:"relay_url"`
 	GroupName string `json:"group_name"`
 }
+
+type SavedRelay struct {
+	URL    string   `json:"url"`
+	Groups []string `json:"groups"`
+}
