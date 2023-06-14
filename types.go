@@ -1,23 +1,19 @@
 package main
 
-import "github.com/nbd-wtf/go-nostr"
+import (
+	"github.com/nbd-wtf/go-nostr"
+	"github.com/puzpuzpuz/xsync"
+)
 
 type ChatRelay struct {
 	Relay         nostr.Relay
-	Subscriptions map[string]nostr.Subscription
-	Groups        map[string]ChatGroup
+	Subscriptions *xsync.MapOf[string, *nostr.Subscription]
+	Groups        *xsync.MapOf[string, *ChatGroup]
 }
 
 type ChatGroup struct {
-	Name         string        `json:"name"`
-	ChatMessages []ChatMessage `json:"chat_messages"`
-}
-
-type ChatMessage struct {
-	ID        string          `json:"id"`
-	PubKey    string          `json:"pubkey"`
-	CreatedAt nostr.Timestamp `json:"created_at"`
-	Content   string          `json:"content"`
+	ID           string         `json:"id"`
+	ChatMessages []*nostr.Event `json:"chat_messages"`
 }
 
 type LeftMenuItem struct {
