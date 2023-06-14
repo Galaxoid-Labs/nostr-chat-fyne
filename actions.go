@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
@@ -17,7 +18,7 @@ func publishChat(message string) error {
 		fmt.Println("Publishing to", chatRelay.Relay.URL)
 		u, err := url.Parse(chatRelay.Relay.URL)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		ev := nostr.Event{
 			CreatedAt: nostr.Now(),
@@ -29,8 +30,16 @@ func publishChat(message string) error {
 			panic(err)
 		}
 
-		ctx := context.Background()
-		chatRelay.Relay.Publish(ctx, ev)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		res, err := chatRelay.Relay.Publish(ctx, ev)
+		if err != nil {
+			return err
+		}
+
+		if res == nostr.PublishStatusFailed {
+			return fmt.Errorf("event not acknowledged by relay in 1 min")
+		}
 		return nil
 	}
 

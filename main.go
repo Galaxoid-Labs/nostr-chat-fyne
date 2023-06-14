@@ -263,10 +263,12 @@ func addGroup(groupId string, relaysListWidget *widget.List, chatMessagesListWid
 	chatRelay, ok := relays.Load(selectedRelayUrl)
 	if !ok || selectedRelayUrl == "" {
 		// TODO: Better handling
+		fmt.Println("no relay to add group to:", selectedRelayUrl)
 		return
 	}
 
-	if _, ok := chatRelay.Groups.Load(groupId); ok {
+	if g, ok := chatRelay.Groups.Load(groupId); ok {
+		fmt.Println("group already there:", g)
 		return
 	}
 
