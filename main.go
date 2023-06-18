@@ -198,13 +198,12 @@ func main() {
 		widget.NewToolbarAction(theme.DeleteIcon(), func() {
 			dialog.NewConfirm("Reset local data?", "This will remove all relays and your private key.", func(b bool) {
 				if b {
-					relays = nil
 					relays.Range(func(_ string, chatRelay *ChatRelay) bool {
 						chatRelay.Relay.Close()
 						return true
 					})
 
-					relays = nil
+					relays = xsync.NewMapOf[*ChatRelay]()
 					relayMenuData = nil
 					a.Preferences().RemoveValue(RELAYSKEY)
 					relaysListWidget.Refresh()
