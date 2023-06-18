@@ -259,6 +259,9 @@ func addRelayDialog(relaysListWidget *widget.List, chatMessagesListWidget *widge
 	}, func(b bool) {
 		if entry.Text != "" && b {
 			relayURL := entry.Text
+			if !strings.HasPrefix(relayURL, "wss://") && !strings.HasPrefix(relayURL, "ws://") {
+				relayURL = "wss://" + relayURL
+			}
 			addRelay(relayURL, relaysListWidget, chatMessagesListWidget)
 			addGroup(relayURL, "/", relaysListWidget, chatMessagesListWidget)
 		}
@@ -323,10 +326,6 @@ func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, ch
 }
 
 func addRelay(relayURL string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
-	if !strings.HasPrefix(relayURL, "wss://") && !strings.HasPrefix(relayURL, "ws://") {
-		relayURL = "wss://" + relayURL
-	}
-
 	if _, ok := relays.Load(relayURL); ok {
 		return
 	} else {
