@@ -49,6 +49,8 @@ func main() {
 	// Keystore might be using the native keyring or falling back to just a file with a key
 	k = startKeystore()
 
+	// a.Preferences().RemoveValue(RELAYSKEY)
+
 	// Setup the right side of the window
 	var chatMessagesListWidget *widget.List
 	chatMessagesListWidget = widget.NewList(
@@ -128,19 +130,6 @@ func main() {
 		},
 		func() fyne.CanvasObject {
 			b := widget.NewButtonWithIcon("", theme.ContentAddIcon(), func() {
-				entry := widget.NewEntry()
-				entry.SetPlaceHolder("ex: /pizza")
-				dialog.ShowForm("Add Group                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
-					widget.NewFormItem("Group Name", entry),
-				}, func(b bool) {
-					group := entry.Text
-					if group != "" {
-						if !strings.HasPrefix(group, "/") {
-							group = "/" + group
-						}
-						addGroup(selectRelayURL, group, relaysListWidget, chatMessagesListWidget)
-					}
-				}, w)
 			})
 			return container.NewHBox(widget.NewLabel("template"), layout.NewSpacer(), b)
 		},
@@ -152,9 +141,28 @@ func main() {
 						Bold:   true,
 						Italic: true,
 					}
+					o.(*fyne.Container).Objects[2].(*widget.Button).OnTapped = func() {
+						entry := widget.NewEntry()
+						entry.SetPlaceHolder("ex: /pizza")
+						dialog.ShowForm("Add Group                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
+							widget.NewFormItem("Group Name", entry),
+						}, func(b bool) {
+							group := entry.Text
+							if group != "" {
+								if !strings.HasPrefix(group, "/") {
+									group = "/" + group
+								}
+								addGroup(relayMenuData[i].RelayURL, group, relaysListWidget, chatMessagesListWidget)
+							}
+						}, w)
+					}
 					o.(*fyne.Container).Objects[2].Show()
 				} else {
 					o.(*fyne.Container).Objects[0].(*widget.Label).SetText("    " + relayMenuData[i].GroupName)
+					o.(*fyne.Container).Objects[0].(*widget.Label).TextStyle = fyne.TextStyle{
+						Bold:   false,
+						Italic: false,
+					}
 					o.(*fyne.Container).Objects[2].Hide()
 				}
 			}
@@ -261,6 +269,7 @@ func addRelayDialog(relaysListWidget *widget.List, chatMessagesListWidget *widge
 
 func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
 	chatRelay, ok := relays.Load(relayURL)
+	println(chatRelay.Relay.URL)
 	if !ok {
 		// TODO: Better handling
 		fmt.Println("no relay to add group to:", relayURL)
@@ -345,6 +354,12 @@ func updateLeftMenuList(relaysListWidget *widget.List) {
 	relayMenuData = make([]LeftMenuItem, 0)
 
 	relays.Range(func(_ string, chatRelay *ChatRelay) bool {
+		flmi := LeftMenuItem{
+			RelayURL:  chatRelay.Relay.URL,
+			GroupName: "/",
+		}
+		relayMenuData = append(relayMenuData, flmi)
+
 		chatRelay.Groups.Range(func(_ string, group *ChatGroup) bool {
 			if group.ID != "/" {
 				lmi := LeftMenuItem{
@@ -357,11 +372,6 @@ func updateLeftMenuList(relaysListWidget *widget.List) {
 			return true
 		})
 
-		flmi := LeftMenuItem{
-			RelayURL:  chatRelay.Relay.URL,
-			GroupName: "/",
-		}
-		relayMenuData = append([]LeftMenuItem{flmi}, relayMenuData...)
 		return true
 	})
 
