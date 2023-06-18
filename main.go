@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"image/color"
-	"net/url"
-	"sort"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -16,46 +14,53 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/nbd-wtf/go-nostr/nip19"
-	"github.com/zalando/go-keyring"
+	"github.com/puzpuzpuz/xsync"
 	"golang.org/x/net/context"
 )
 
-const APPID = "com.galaxoidlabs.nostrchat"
-const APP_TITLE = "Nostr Chat"
-const USERKEY = "userkey"
-const RELAYSKEY = "relayskey"
+const (
+	APP_TITLE = "Nostr Chat"
+	APPID     = "com.galaxoidlabs.nostrchat"
+	RELAYSKEY = "relays"
+)
 
 var baseSize = fyne.Size{Width: 900, Height: 640}
 
-var relays = make(map[string]ChatRelay, 0)
-var relayMenuData = make([]LeftMenuItem, 0)
-var selectedRelayUrl = ""
-var selectedGroupName = "/"
+var (
+	relays            = xsync.NewMapOf[*ChatRelay]()
+	relayMenuData     = make([]LeftMenuItem, 0)
+	selectRelayURL    = ""
+	selectedGroupName = "/"
+)
 
-var a fyne.App
-var w fyne.Window
+var (
+	a fyne.App
+	w fyne.Window
+	k Keystore
+)
 
 var emptyRelayListOverlay *fyne.Container
 
 func main() {
-
 	a = app.NewWithID(APPID)
 	w = a.NewWindow(APP_TITLE)
 	w.Resize(baseSize)
+
+	// Keystore might be using the native keyring or falling back to just a file with a key
+	k = startKeystore()
 
 	// Setup the right side of the window
 	var chatMessagesListWidget *widget.List
 	chatMessagesListWidget = widget.NewList(
 		func() int {
-			if room, ok := relays[selectedRelayUrl].Groups[selectedGroupName]; ok {
-				return len(room.ChatMessages)
-			} else {
-				return 0
+			if relay, ok := relays.Load(selectRelayURL); ok {
+				if room, ok := relay.Groups.Load(selectedGroupName); ok {
+					return len(room.ChatMessages)
+				}
 			}
+			return 0
 		},
 		func() fyne.CanvasObject {
-
 			pubKey := canvas.NewText("template", color.RGBA{139, 190, 178, 255})
 			pubKey.TextStyle.Bold = true
 			pubKey.Alignment = fyne.TextAlignLeading
@@ -70,13 +75,15 @@ func main() {
 			return border
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
-			if room, ok := relays[selectedRelayUrl].Groups[selectedGroupName]; ok {
-				var chatMessage = room.ChatMessages[i]
-				pubKey := fmt.Sprintf("[ %s ]", chatMessage.PubKey[len(chatMessage.PubKey)-8:])
-				message := chatMessage.Content
-				o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Text).Text = pubKey
-				o.(*fyne.Container).Objects[0].(*widget.Label).SetText(message)
-				chatMessagesListWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
+			if relay, ok := relays.Load(selectRelayURL); ok {
+				if room, ok := relay.Groups.Load(selectedGroupName); ok {
+					chatMessage := room.ChatMessages[i]
+					pubKey := fmt.Sprintf("[ %s ]", chatMessage.PubKey[len(chatMessage.PubKey)-8:])
+					message := chatMessage.Content
+					o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Text).Text = pubKey
+					o.(*fyne.Container).Objects[0].(*widget.Label).SetText(message)
+					chatMessagesListWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
+				}
 			}
 		},
 	)
@@ -121,19 +128,17 @@ func main() {
 		},
 		func() fyne.CanvasObject {
 			b := widget.NewButtonWithIcon("", theme.ContentAddIcon(), func() {
-				var entry = widget.NewEntry()
+				entry := widget.NewEntry()
 				entry.SetPlaceHolder("ex: /pizza")
 				dialog.ShowForm("Add Group                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
 					widget.NewFormItem("Group Name", entry),
 				}, func(b bool) {
-					var group = entry.Text
+					group := entry.Text
 					if group != "" {
 						if !strings.HasPrefix(group, "/") {
 							group = "/" + group
 						}
-						go func() {
-							addGroup(group, relaysListWidget, chatMessagesListWidget)
-						}()
+						addGroup(selectRelayURL, group, relaysListWidget, chatMessagesListWidget)
 					}
 				}, w)
 			})
@@ -157,7 +162,7 @@ func main() {
 	)
 
 	relaysListWidget.OnSelected = func(id widget.ListItemID) {
-		selectedRelayUrl = relayMenuData[id].RelayURL
+		selectRelayURL = relayMenuData[id].RelayURL
 		selectedGroupName = relayMenuData[id].GroupName
 		chatMessagesListWidget.Refresh()
 		chatMessagesListWidget.ScrollToBottom() // TODO: Probalby need to guard this. For instance if user has scrolled up, it shouldnt jump to bottom on its own
@@ -165,7 +170,7 @@ func main() {
 
 	relaysBottomToolbarWidget := widget.NewToolbar(
 		widget.NewToolbarAction(theme.AccountIcon(), func() {
-			var entry = widget.NewEntry()
+			entry := widget.NewEntry()
 			entry.SetPlaceHolder("nsec1...")
 			dialog.ShowForm("Import a Nostr Private Key                                             ", "Import", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
 				widget.NewFormItem("Private Key", entry),
@@ -186,9 +191,10 @@ func main() {
 			dialog.NewConfirm("Reset local data?", "This will remove all relays and your private key.", func(b bool) {
 				if b {
 					relays = nil
-					for _, chatRelay := range relays {
+					relays.Range(func(_ string, chatRelay *ChatRelay) bool {
 						chatRelay.Relay.Close()
-					}
+						return true
+					})
 
 					relays = nil
 					relayMenuData = nil
@@ -196,7 +202,7 @@ func main() {
 					relaysListWidget.Refresh()
 					chatMessagesListWidget.Refresh()
 
-					keyring.Delete(APPID, USERKEY)
+					k.Erase()
 				}
 			}, w).Show()
 		}),
@@ -217,14 +223,18 @@ func main() {
 	go func() {
 		relays := getRelays()
 		for _, relay := range relays {
-			if relay != "" { // TODO: Better relay validation
-				addRelay(relay, relaysListWidget, chatMessagesListWidget)
+			if relay.URL == "" {
+				// TODO: Better relay validation
+				continue
+			}
+			addRelay(relay.URL, relaysListWidget, chatMessagesListWidget)
+			for _, group := range relay.Groups {
+				addGroup(relay.URL, group, relaysListWidget, chatMessagesListWidget)
 			}
 		}
 	}()
 
 	w.ShowAndRun()
-
 }
 
 func hideEmptyRelayListOverlay() {
@@ -235,158 +245,83 @@ func showEmptyRelayListOverlay() {
 	emptyRelayListOverlay.Show()
 }
 
-func addRelayDialog(relaysWidgetList *widget.List, chatMessagesListWidget *widget.List) {
-	var entry = widget.NewEntry()
-	entry.SetPlaceHolder("wss://somerelay.com")
+func addRelayDialog(relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
+	entry := widget.NewEntry()
+	entry.SetPlaceHolder("somerelay.com")
 	dialog.ShowForm("Add Relay                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
 		widget.NewFormItem("URL", entry),
 	}, func(b bool) {
 		if entry.Text != "" && b {
-			go func() {
-				addRelay(entry.Text, relaysWidgetList, chatMessagesListWidget)
-			}()
+			relayURL := entry.Text
+			addRelay(relayURL, relaysListWidget, chatMessagesListWidget)
+			addGroup(relayURL, "/", relaysListWidget, chatMessagesListWidget)
 		}
 	}, w)
 }
 
-func addGroup(groupName string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
-	if selectedRelayUrl == "" { // TODO: Better handling...
+func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
+	chatRelay, ok := relays.Load(relayURL)
+	if !ok {
+		// TODO: Better handling
+		fmt.Println("no relay to add group to:", relayURL)
 		return
 	}
-	if _, ok := relays[selectedRelayUrl].Groups[groupName]; ok {
+
+	if g, ok := chatRelay.Groups.Load(groupId); ok {
+		fmt.Println("group already there:", g)
 		return
-	} else {
-		relays[selectedRelayUrl].Groups[groupName] = ChatGroup{
-			Name:         groupName,
-			ChatMessages: make([]ChatMessage, 0),
+	}
+
+	group := &ChatGroup{
+		ID:           groupId,
+		ChatMessages: make([]*nostr.Event, 0),
+	}
+	chatRelay.Groups.Store(groupId, group)
+
+	ctx := context.Background()
+	sub := chatRelay.Relay.PrepareSubscription(ctx)
+	sub.SetLabel("chat" + groupId)
+	sub.Filters = []nostr.Filter{{
+		Kinds: []int{9},
+		Tags: nostr.TagMap{
+			"g": {groupId},
+		},
+	}}
+
+	chatRelay.Subscriptions.Store(groupId, sub)
+	saveRelays()
+	updateLeftMenuList(relaysListWidget)
+
+	for idx, menuItem := range relayMenuData {
+		if menuItem.GroupName == groupId {
+			relaysListWidget.Select(idx)
+			break
 		}
+	}
 
-		filters := []nostr.Filter{{
-			Kinds: []int{9},
-			Tags: nostr.TagMap{
-				"g": {groupName},
-			},
-		}}
-		ctx := context.Background()
+	if err := sub.Fire(); err != nil {
+		// TODO: better handling
+		panic(err)
+	}
 
-		chatRelay := relays[selectedRelayUrl]
-
-		sub, err := chatRelay.Relay.Subscribe(ctx, filters)
-		if err != nil {
-			panic(err)
-		}
-
-		chatRelay.Subscriptions[groupName] = *sub
-		relays[selectedRelayUrl] = chatRelay
-
-		fmt.Println(relays[selectedRelayUrl].Subscriptions)
-
-		// Save relay
-		saveRelays()
-
-		updateLeftMenuList(relaysListWidget)
-
-		for idx, menuItem := range relayMenuData {
-			if menuItem.GroupName == groupName {
-				relaysListWidget.Select(idx)
-				break
-			}
-		}
-
+	go func() {
 		for ev := range sub.Events {
-
 			if ev.Kind == 9 {
-
-				for _, tag := range ev.Tags {
-					if tag.Key() == "g" {
-
-						cm := ChatMessage{
-							ID:        ev.ID,
-							PubKey:    ev.PubKey,
-							CreatedAt: ev.CreatedAt,
-							Content:   ev.Content,
-						}
-
-						if group, ok := relays[sub.Relay.URL].Groups[tag.Value()]; ok {
-
-							group.ChatMessages = append(group.ChatMessages, cm)
-							sort.Slice(group.ChatMessages, func(i, j int) bool {
-								return group.ChatMessages[i].CreatedAt < group.ChatMessages[j].CreatedAt
-							})
-							relays[sub.Relay.URL].Groups[tag.Value()] = group
-
-						} else {
-
-							relays[sub.Relay.URL].Groups[tag.Value()] = ChatGroup{
-								Name:         tag.Value(),
-								ChatMessages: []ChatMessage{cm},
-							}
-
-						}
-
-					}
-
-				}
-
+				group.ChatMessages = insertEventIntoAscendingList(group.ChatMessages, ev)
 				chatMessagesListWidget.Refresh()
 				chatMessagesListWidget.ScrollToBottom()
-
 				updateLeftMenuList(relaysListWidget)
-
 			}
 		}
-	}
-}
-
-func publishChat(message string) error {
-	hex, err := keyring.Get(APPID, USERKEY)
-	if err != nil {
-		fmt.Print(err)
-		return err
-	}
-
-	if err != nil {
-		fmt.Print(err)
-		return err
-	}
-
-	publicKey, err := nostr.GetPublicKey(hex)
-
-	if err != nil {
-		fmt.Print(err)
-		return err
-	}
-
-	for _, chatRelay := range relays {
-		if chatRelay.Relay.URL == selectedRelayUrl {
-			fmt.Println("Publishing to", chatRelay.Relay.URL)
-			u, err := url.Parse(chatRelay.Relay.URL)
-			if err != nil {
-				return err
-			}
-			ev := nostr.Event{
-				PubKey:    publicKey,
-				CreatedAt: nostr.Now(),
-				Kind:      9,
-				Tags:      nostr.Tags{nostr.Tag{"g", selectedGroupName, u.Host}},
-				Content:   message,
-			}
-			err = ev.Sign(hex)
-			if err != nil {
-				panic(err)
-			}
-
-			ctx := context.Background()
-			chatRelay.Relay.Publish(ctx, ev)
-			return nil
-		}
-	}
-
-	return nil
+	}()
 }
 
 func addRelay(relayURL string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
-	if _, ok := relays[relayURL]; ok {
+	if !strings.HasPrefix(relayURL, "wss://") && !strings.HasPrefix(relayURL, "ws://") {
+		relayURL = "wss://" + relayURL
+	}
+
+	if _, ok := relays.Load(relayURL); ok {
 		return
 	} else {
 		ctx := context.Background()
@@ -398,149 +333,37 @@ func addRelay(relayURL string, relaysListWidget *widget.List, chatMessagesListWi
 
 		chatRelay := &ChatRelay{
 			Relay:         *relay,
-			Subscriptions: make(map[string]nostr.Subscription, 0),
-			Groups:        make(map[string]ChatGroup, 0),
+			Subscriptions: xsync.NewMapOf[*nostr.Subscription](),
+			Groups:        xsync.NewMapOf[*ChatGroup](),
 		}
 
-		relays[relayURL] = *chatRelay
-		//selectedRelayUrl = relayURL
-
-		lmi := LeftMenuItem{
-			RelayURL:  chatRelay.Relay.URL,
-			GroupName: "/",
-		}
-
-		relayMenuData = append(relayMenuData, lmi)
-		relaysListWidget.Refresh()
-		relaysListWidget.Select(len(relayMenuData) - 1)
-
-		filters := []nostr.Filter{{
-			Kinds: []int{9},
-			Tags: nostr.TagMap{
-				"g": {"/"},
-			},
-		}}
-
-		sub, err := relay.Subscribe(ctx, filters)
-		if err != nil {
-			panic(err)
-		}
-
-		chatRelay.Subscriptions["/"] = *sub
-		relays[relayURL] = *chatRelay
-
-		// Save relay
-		saveRelays()
-
-		for ev := range sub.Events {
-
-			if ev.Kind == 9 {
-
-				for _, tag := range ev.Tags {
-					if tag.Key() == "g" {
-
-						cm := ChatMessage{
-							ID:        ev.ID,
-							PubKey:    ev.PubKey,
-							CreatedAt: ev.CreatedAt,
-							Content:   ev.Content,
-						}
-
-						if group, ok := relays[sub.Relay.URL].Groups[tag.Value()]; ok {
-
-							group.ChatMessages = append(group.ChatMessages, cm)
-							sort.Slice(group.ChatMessages, func(i, j int) bool {
-								return group.ChatMessages[i].CreatedAt < group.ChatMessages[j].CreatedAt
-							})
-							relays[sub.Relay.URL].Groups[tag.Value()] = group
-
-						} else {
-
-							relays[sub.Relay.URL].Groups[tag.Value()] = ChatGroup{
-								Name:         tag.Value(),
-								ChatMessages: []ChatMessage{cm},
-							}
-
-						}
-
-					}
-
-				}
-
-				chatMessagesListWidget.Refresh()
-				chatMessagesListWidget.ScrollToBottom()
-
-				updateLeftMenuList(relaysListWidget)
-
-			}
-		}
-
+		relays.Store(relayURL, chatRelay)
 	}
 }
 
 func updateLeftMenuList(relaysListWidget *widget.List) {
 	relayMenuData = make([]LeftMenuItem, 0)
 
-	for _, chatRelay := range relays {
-
-		for _, group := range chatRelay.Groups {
-			if group.Name != "/" {
+	relays.Range(func(_ string, chatRelay *ChatRelay) bool {
+		chatRelay.Groups.Range(func(_ string, group *ChatGroup) bool {
+			if group.ID != "/" {
 				lmi := LeftMenuItem{
 					RelayURL:  chatRelay.Relay.URL,
-					GroupName: group.Name,
+					GroupName: group.ID,
 				}
 				relayMenuData = append(relayMenuData, lmi)
 			}
 
-		}
+			return true
+		})
 
 		flmi := LeftMenuItem{
 			RelayURL:  chatRelay.Relay.URL,
 			GroupName: "/",
 		}
 		relayMenuData = append([]LeftMenuItem{flmi}, relayMenuData...)
-	}
+		return true
+	})
 
 	relaysListWidget.Refresh()
-}
-
-func saveKey(value string) error {
-	if strings.HasPrefix(value, "nsec") {
-		_, hex, err := nip19.Decode(value)
-		if err != nil {
-			return err
-		}
-
-		err = keyring.Set(APPID, USERKEY, hex.(string))
-		if err != nil {
-			return err
-		}
-	} else {
-		publicKey, err := nostr.GetPublicKey(value)
-		if err != nil {
-			return err
-		}
-		if nostr.IsValidPublicKeyHex(publicKey) {
-			err = keyring.Set(APPID, USERKEY, value)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func saveRelays() {
-	var urls = make([]string, 0)
-	for _, chatRelay := range relays {
-		urls = append(urls, chatRelay.Relay.URL)
-	}
-	relaysStr := strings.Join(urls, ",")
-	a.Preferences().SetString(RELAYSKEY, relaysStr)
-}
-
-func getRelays() []string {
-	relaysStr := a.Preferences().String(RELAYSKEY)
-	return strings.Split(relaysStr, ",")
 }
