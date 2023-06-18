@@ -12,11 +12,11 @@ import (
 )
 
 func startKeystore() Keystore {
-	if _, err := keyring.Get(APPID, USERKEY); err != nil {
+	// Simple hack to see if keyring is supported
+	if err := keyring.Set(APPID, "dummy", "dummy"); err != nil {
 		fmt.Println(err)
 		return FileKeystore{}
 	}
-
 	return KeyringStore{}
 }
 
@@ -74,7 +74,7 @@ func (f FileKeystore) Save(key string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(path, USERKEY), keybin, 0600)
+	return os.WriteFile(filepath.Join(path, USERKEY), keybin, 0o600)
 }
 
 func (f FileKeystore) Erase() error {

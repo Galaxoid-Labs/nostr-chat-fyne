@@ -202,7 +202,6 @@ func main() {
 						chatRelay.Relay.Close()
 						return true
 					})
-
 					relays = xsync.NewMapOf[*ChatRelay]()
 					relayMenuData = nil
 					a.Preferences().RemoveValue(RELAYSKEY)
