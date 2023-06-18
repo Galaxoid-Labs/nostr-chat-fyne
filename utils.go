@@ -2,7 +2,7 @@ package main
 
 import "github.com/nbd-wtf/go-nostr"
 
-func insertEventIntoDescendingList(sortedArray []*nostr.Event, event *nostr.Event) []*nostr.Event {
+func insertEventIntoAscendingList(sortedArray []*nostr.Event, event *nostr.Event) []*nostr.Event {
 	size := len(sortedArray)
 	start := 0
 	end := size - 1
@@ -11,9 +11,9 @@ func insertEventIntoDescendingList(sortedArray []*nostr.Event, event *nostr.Even
 
 	if end < 0 {
 		return []*nostr.Event{event}
-	} else if event.CreatedAt < sortedArray[end].CreatedAt {
+	} else if event.CreatedAt > sortedArray[end].CreatedAt {
 		return append(sortedArray, event)
-	} else if event.CreatedAt > sortedArray[start].CreatedAt {
+	} else if event.CreatedAt < sortedArray[start].CreatedAt {
 		newArr := make([]*nostr.Event, size+1)
 		newArr[0] = event
 		copy(newArr[1:], sortedArray)
@@ -27,9 +27,9 @@ func insertEventIntoDescendingList(sortedArray []*nostr.Event, event *nostr.Even
 				break
 			}
 			mid = int(start + (end-start)/2)
-			if sortedArray[mid].CreatedAt > event.CreatedAt {
+			if sortedArray[mid].CreatedAt < event.CreatedAt {
 				start = mid
-			} else if sortedArray[mid].CreatedAt < event.CreatedAt {
+			} else if sortedArray[mid].CreatedAt > event.CreatedAt {
 				end = mid
 			} else {
 				position = mid

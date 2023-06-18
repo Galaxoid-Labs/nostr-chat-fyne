@@ -13,8 +13,8 @@ import (
 )
 
 func publishChat(message string) error {
-	chatRelay, _ := relays.Load(selectedRelayUrl)
-	if chatRelay.Relay.URL == selectedRelayUrl {
+	chatRelay, _ := relays.Load(selectRelayURL)
+	if chatRelay.Relay.URL == selectRelayURL {
 		fmt.Println("Publishing to", chatRelay.Relay.URL)
 		u, err := url.Parse(chatRelay.Relay.URL)
 		if err != nil {
@@ -75,7 +75,7 @@ func saveKey(value string) error {
 func saveRelays() {
 	data := make([]SavedRelay, relays.Size())
 	r := 0
-	relays.Range(func(_ string, chatRelay ChatRelay) bool {
+	relays.Range(func(_ string, chatRelay *ChatRelay) bool {
 		data[r] = SavedRelay{
 			URL:    chatRelay.Relay.URL,
 			Groups: make([]string, chatRelay.Groups.Size()),
