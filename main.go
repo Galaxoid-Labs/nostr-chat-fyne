@@ -269,7 +269,6 @@ func addRelayDialog(relaysListWidget *widget.List, chatMessagesListWidget *widge
 
 func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, chatMessagesListWidget *widget.List) {
 	chatRelay, ok := relays.Load(relayURL)
-	println(chatRelay.Relay.URL)
 	if !ok {
 		// TODO: Better handling
 		fmt.Println("no relay to add group to:", relayURL)
