@@ -6,8 +6,10 @@ require (
 	fyne.io/fyne/v2 v2.3.4
 	github.com/mitchellh/go-homedir v1.0.0
 	github.com/nbd-wtf/go-nostr v0.18.7
+	github.com/puzpuzpuz/xsync v1.5.2
 	github.com/zalando/go-keyring v0.2.3
 	golang.org/x/net v0.0.0-20220722155237-a158d28d115b
+	golang.org/x/sync v0.3.0
 )
 
 require (
@@ -38,7 +40,6 @@ require (
 	github.com/jsummers/gobmp v0.0.0-20151104160322-e2ba15ffa76e // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/puzpuzpuz/xsync v1.5.2 // indirect
 	github.com/srwiley/oksvg v0.0.0-20220731023508-a61f04f16b76 // indirect
 	github.com/srwiley/rasterx v0.0.0-20210519020934-456a8d69b780 // indirect
 	github.com/stretchr/testify v1.8.1 // indirect

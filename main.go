@@ -81,9 +81,14 @@ func main() {
 				if relay.Groups != nil {
 					if room, ok := relay.Groups.Load(selectedGroupName); ok {
 						chatMessage := room.ChatMessages[i]
-						pubKey := fmt.Sprintf("[ %s ]", chatMessage.PubKey[len(chatMessage.PubKey)-8:])
+						var name string
+						if metadata, _ := people.Load(chatMessage.PubKey); metadata != nil && metadata.Name != "" {
+							name = fmt.Sprintf("[ %s ]", strings.TrimSpace(metadata.Name))
+						} else {
+							name = fmt.Sprintf("[ %s ]", chatMessage.PubKey[len(chatMessage.PubKey)-8:])
+						}
 						message := chatMessage.Content
-						o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Text).Text = pubKey
+						o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Text).Text = name
 						o.(*fyne.Container).Objects[0].(*widget.Label).SetText(message)
 						chatMessagesListWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
 					}
@@ -322,6 +327,15 @@ func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, ch
 				chatMessagesListWidget.Refresh()
 				chatMessagesListWidget.ScrollToBottom()
 				updateLeftMenuList(relaysListWidget)
+
+				go func(pubkey string) {
+					metadata := <-ensurePersonMetadata(pubkey)
+					if metadata == nil {
+						// it will be nil if we didn't get any new metadata
+						// so we don't have to update anything if
+						return
+					}
+				}(ev.PubKey)
 			}
 		}
 	}()
