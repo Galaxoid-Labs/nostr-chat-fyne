@@ -78,13 +78,15 @@ func main() {
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			if relay, ok := relays.Load(selectRelayURL); ok {
-				if room, ok := relay.Groups.Load(selectedGroupName); ok {
-					chatMessage := room.ChatMessages[i]
-					pubKey := fmt.Sprintf("[ %s ]", chatMessage.PubKey[len(chatMessage.PubKey)-8:])
-					message := chatMessage.Content
-					o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Text).Text = pubKey
-					o.(*fyne.Container).Objects[0].(*widget.Label).SetText(message)
-					chatMessagesListWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
+				if relay.Groups != nil {
+					if room, ok := relay.Groups.Load(selectedGroupName); ok {
+						chatMessage := room.ChatMessages[i]
+						pubKey := fmt.Sprintf("[ %s ]", chatMessage.PubKey[len(chatMessage.PubKey)-8:])
+						message := chatMessage.Content
+						o.(*fyne.Container).Objects[1].(*fyne.Container).Objects[0].(*fyne.Container).Objects[0].(*canvas.Text).Text = pubKey
+						o.(*fyne.Container).Objects[0].(*widget.Label).SetText(message)
+						chatMessagesListWidget.SetItemHeight(i, o.(*fyne.Container).Objects[0].(*widget.Label).MinSize().Height)
+					}
 				}
 			}
 		},
