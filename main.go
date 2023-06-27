@@ -339,6 +339,7 @@ func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, ch
 						// so we don't have to update anything if
 						return
 					}
+					chatMessagesListWidget.Refresh()
 				}(ev.PubKey)
 			}
 		}

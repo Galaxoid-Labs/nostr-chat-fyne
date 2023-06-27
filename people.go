@@ -28,6 +28,8 @@ func ensurePersonMetadata(pubkey string) chan *nostr.ProfileMetadata {
 				events := pool.SubManyEose(ctx, []string{
 					"wss://purplepag.es",
 					"wss://relay.damus.io",
+					"wss://relay.nostr.bg",
+					"wss://nostr-pub.wellorder.net",
 					"wss://relay.nostr.band",
 				}, nostr.Filters{
 					{
@@ -67,6 +69,7 @@ func ensurePersonMetadata(pubkey string) chan *nostr.ProfileMetadata {
 					}
 				}
 
+				fmt.Println("searching metadata for", pubkey, "on", relays)
 				events = pool.SubManyEose(ctx, relays, nostr.Filters{
 					{
 						Kinds:   []int{0},
