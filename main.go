@@ -301,12 +301,20 @@ func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, ch
 	ctx := context.Background()
 	sub := chatRelay.Relay.PrepareSubscription(ctx)
 	sub.SetLabel("chat" + groupId)
-	sub.Filters = []nostr.Filter{{
-		Kinds: []int{9},
-		Tags: nostr.TagMap{
-			"g": {groupId},
+	sub.Filters = []nostr.Filter{
+		{
+			Kinds: []int{9},
+			Tags: nostr.TagMap{
+				"g": {groupId},
+			},
 		},
-	}}
+		{
+			Kinds: []int{39000},
+			Tags: nostr.TagMap{
+				"d": {groupId},
+			},
+		},
+	}
 
 	chatRelay.Subscriptions.Store(groupId, sub)
 	saveRelays()
@@ -326,7 +334,13 @@ func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, ch
 
 	go func() {
 		for ev := range sub.Events {
-			if ev.Kind == 9 {
+			switch ev.Kind {
+			case 39000:
+				tag := ev.Tags.GetFirst([]string{"name", ""})
+				if tag != nil {
+					group.Name = (*tag)[1]
+				}
+			case 9:
 				group.ChatMessages = insertEventIntoAscendingList(group.ChatMessages, ev)
 				chatMessagesListWidget.Refresh()
 				chatMessagesListWidget.ScrollToBottom()
@@ -379,9 +393,14 @@ func updateLeftMenuList(relaysListWidget *widget.List) {
 
 		chatRelay.Groups.Range(func(_ string, group *ChatGroup) bool {
 			if group.ID != "/" {
+				name := group.Name
+				if name == "" {
+					name = group.ID
+				}
+
 				lmi := LeftMenuItem{
 					RelayURL:  chatRelay.Relay.URL,
-					GroupName: group.ID,
+					GroupName: name,
 				}
 				relayMenuData = append(relayMenuData, lmi)
 			}

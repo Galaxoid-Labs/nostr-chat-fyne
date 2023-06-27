@@ -13,6 +13,7 @@ type ChatRelay struct {
 
 type ChatGroup struct {
 	ID           string         `json:"id"`
+	Name         string         `json:"name"`
 	ChatMessages []*nostr.Event `json:"chat_messages"`
 }
 
