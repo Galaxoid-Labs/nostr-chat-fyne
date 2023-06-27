@@ -37,6 +37,7 @@ var (
 	a fyne.App
 	w fyne.Window
 	k Keystore
+	t *CustomTheme
 )
 
 var emptyRelayListOverlay *fyne.Container
@@ -44,6 +45,8 @@ var emptyRelayListOverlay *fyne.Container
 func main() {
 	a = app.NewWithID(APPID)
 	w = a.NewWindow(APP_TITLE)
+	t = NewCustomTheme()
+	a.Settings().SetTheme(t)
 	w.Resize(baseSize)
 
 	// Keystore might be using the native keyring or falling back to just a file with a key
@@ -138,6 +141,7 @@ func main() {
 		func() fyne.CanvasObject {
 			b := widget.NewButtonWithIcon("", theme.ContentAddIcon(), func() {
 			})
+			b.Importance = widget.LowImportance
 			return container.NewHBox(widget.NewLabel("template"), layout.NewSpacer(), b)
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) { // CHECK out of index...
