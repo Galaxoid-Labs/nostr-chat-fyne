@@ -1,6 +1,19 @@
 package main
 
-import "github.com/nbd-wtf/go-nostr"
+import (
+	"fmt"
+	"image"
+	"image/color"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"net/http"
+
+	_ "golang.org/x/image/webp"
+
+	"github.com/nbd-wtf/go-nostr"
+	"github.com/puzpuzpuz/xsync"
+)
 
 func insertEventIntoAscendingList(sortedArray []*nostr.Event, event *nostr.Event) []*nostr.Event {
 	size := len(sortedArray)
@@ -54,4 +67,38 @@ func insertEventIntoAscendingList(sortedArray []*nostr.Event, event *nostr.Event
 	}
 
 	return sortedArray
+}
+
+var neutralImage = generateNeutralImage(color.RGBA{156, 62, 93, 255})
+
+func generateNeutralImage(color color.Color) image.Image {
+	const size = 1
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	for x := 0; x < size; x++ {
+		for y := 0; y < size; y++ {
+			img.Set(x, y, color)
+		}
+	}
+	return img
+}
+
+var imagesCache = xsync.NewMapOf[image.Image]()
+
+func imageFromURL(u string) image.Image {
+	res, _ := imagesCache.LoadOrCompute(u, func() image.Image {
+		fmt.Println("LOADING", u)
+		response, err := http.Get(u)
+		if err != nil {
+			return nil
+		}
+		defer response.Body.Close()
+
+		img, _, err := image.Decode(response.Body)
+		if err != nil {
+			return nil
+		}
+
+		return img
+	})
+	return res
 }

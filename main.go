@@ -27,10 +27,10 @@ const (
 var baseSize = fyne.Size{Width: 900, Height: 640}
 
 var (
-	relays            = xsync.NewMapOf[*ChatRelay]()
-	relayMenuData     = make([]LeftMenuItem, 0)
-	selectRelayURL    = ""
-	selectedGroupName = "/"
+	relays          = xsync.NewMapOf[*ChatRelay]()
+	relayMenuData   = make([]LeftMenuItem, 0)
+	selectRelayURL  = ""
+	selectedGroupID = "/"
 )
 
 var (
@@ -59,7 +59,7 @@ func main() {
 	chatMessagesListWidget = widget.NewList(
 		func() int {
 			if relay, ok := relays.Load(selectRelayURL); ok {
-				if room, ok := relay.Groups.Load(selectedGroupName); ok {
+				if room, ok := relay.Groups.Load(selectedGroupID); ok {
 					return len(room.ChatMessages)
 				}
 			}
@@ -82,7 +82,7 @@ func main() {
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			if relay, ok := relays.Load(selectRelayURL); ok {
 				if relay.Groups != nil {
-					if room, ok := relay.Groups.Load(selectedGroupName); ok {
+					if room, ok := relay.Groups.Load(selectedGroupID); ok {
 						chatMessage := room.ChatMessages[i]
 						var name string
 						if metadata, _ := people.Load(chatMessage.PubKey); metadata != nil && metadata.Name != "" {
@@ -142,17 +142,24 @@ func main() {
 			b := widget.NewButtonWithIcon("", theme.ContentAddIcon(), func() {
 			})
 			b.Importance = widget.LowImportance
-			return container.NewHBox(widget.NewLabel("template"), layout.NewSpacer(), b)
+
+			img := canvas.NewImageFromImage(neutralImage)
+			img.SetMinSize(fyne.NewSize(b.MinSize().Height, b.MinSize().Height))
+			return container.NewHBox(widget.NewLabel(""), img, widget.NewLabel("template"), layout.NewSpacer(), b)
 		},
 		func(i widget.ListItemID, o fyne.CanvasObject) { // CHECK out of index...
 			if len(relayMenuData) > i {
-				if relayMenuData[i].GroupName == "/" {
-					o.(*fyne.Container).Objects[0].(*widget.Label).SetText(relayMenuData[i].RelayURL)
-					o.(*fyne.Container).Objects[0].(*widget.Label).TextStyle = fyne.TextStyle{
+				if relayMenuData[i].GroupIcon != "" {
+					o.(*fyne.Container).Objects[1].(*canvas.Image).Image = imageFromURL(relayMenuData[i].GroupIcon)
+				}
+
+				if relayMenuData[i].IsRoot {
+					o.(*fyne.Container).Objects[2].(*widget.Label).SetText(relayMenuData[i].RelayURL)
+					o.(*fyne.Container).Objects[2].(*widget.Label).TextStyle = fyne.TextStyle{
 						Bold:   true,
 						Italic: true,
 					}
-					o.(*fyne.Container).Objects[2].(*widget.Button).OnTapped = func() {
+					o.(*fyne.Container).Objects[4].(*widget.Button).OnTapped = func() {
 						entry := widget.NewEntry()
 						entry.SetPlaceHolder("ex: /pizza")
 						dialog.ShowForm("Add Group                                             ", "Add", "Cancel", []*widget.FormItem{ // Empty space Hack to make dialog bigger
@@ -167,14 +174,15 @@ func main() {
 							}
 						}, w)
 					}
-					o.(*fyne.Container).Objects[2].Show()
+					o.(*fyne.Container).Objects[4].Show()
 				} else {
-					o.(*fyne.Container).Objects[0].(*widget.Label).SetText("    " + relayMenuData[i].GroupName)
-					o.(*fyne.Container).Objects[0].(*widget.Label).TextStyle = fyne.TextStyle{
+					o.(*fyne.Container).Objects[0].(*widget.Label).SetText("    ")
+					o.(*fyne.Container).Objects[2].(*widget.Label).SetText(relayMenuData[i].GroupName)
+					o.(*fyne.Container).Objects[2].(*widget.Label).TextStyle = fyne.TextStyle{
 						Bold:   false,
 						Italic: false,
 					}
-					o.(*fyne.Container).Objects[2].Hide()
+					o.(*fyne.Container).Objects[4].Hide()
 				}
 			}
 		},
@@ -182,7 +190,7 @@ func main() {
 
 	relaysListWidget.OnSelected = func(id widget.ListItemID) {
 		selectRelayURL = relayMenuData[id].RelayURL
-		selectedGroupName = relayMenuData[id].GroupName
+		selectedGroupID = relayMenuData[id].GroupID
 		chatMessagesListWidget.Refresh()
 		chatMessagesListWidget.ScrollToBottom() // TODO: Probalby need to guard this. For instance if user has scrolled up, it shouldnt jump to bottom on its own
 	}
@@ -294,6 +302,7 @@ func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, ch
 
 	group := &ChatGroup{
 		ID:           groupId,
+		Name:         groupId,
 		ChatMessages: make([]*nostr.Event, 0),
 	}
 	chatRelay.Groups.Store(groupId, group)
@@ -309,7 +318,7 @@ func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, ch
 			},
 		},
 		{
-			Kinds: []int{39000},
+			Kinds: []int{39000, 39003},
 			Tags: nostr.TagMap{
 				"d": {groupId},
 			},
@@ -336,10 +345,18 @@ func addGroup(relayURL string, groupId string, relaysListWidget *widget.List, ch
 		for ev := range sub.Events {
 			switch ev.Kind {
 			case 39000:
-				tag := ev.Tags.GetFirst([]string{"name", ""})
-				if tag != nil {
+				if tag := ev.Tags.GetFirst([]string{"name", ""}); tag != nil {
 					group.Name = (*tag)[1]
 				}
+				if tag := ev.Tags.GetFirst([]string{"picture", ""}); tag != nil {
+					group.Picture = (*tag)[1]
+				}
+				updateLeftMenuList(relaysListWidget)
+			case 39003:
+				for _, tag := range ev.Tags.GetAll([]string{"g", ""}) {
+					group.Subgroups = append(group.Subgroups, tag[1])
+				}
+				updateLeftMenuList(relaysListWidget)
 			case 9:
 				group.ChatMessages = insertEventIntoAscendingList(group.ChatMessages, ev)
 				chatMessagesListWidget.Refresh()
@@ -385,26 +402,20 @@ func updateLeftMenuList(relaysListWidget *widget.List) {
 	relayMenuData = make([]LeftMenuItem, 0)
 
 	relays.Range(func(_ string, chatRelay *ChatRelay) bool {
-		flmi := LeftMenuItem{
-			RelayURL:  chatRelay.Relay.URL,
-			GroupName: "/",
-		}
-		relayMenuData = append(relayMenuData, flmi)
+		relayMenuData = append(relayMenuData, LeftMenuItem{
+			RelayURL: chatRelay.Relay.URL,
+			IsRoot:   true,
+			GroupID:  "/",
+		})
 
 		chatRelay.Groups.Range(func(_ string, group *ChatGroup) bool {
-			if group.ID != "/" {
-				name := group.Name
-				if name == "" {
-					name = group.ID
-				}
-
-				lmi := LeftMenuItem{
-					RelayURL:  chatRelay.Relay.URL,
-					GroupName: name,
-				}
-				relayMenuData = append(relayMenuData, lmi)
-			}
-
+			relayMenuData = append(relayMenuData, LeftMenuItem{
+				RelayURL:  chatRelay.Relay.URL,
+				IsRoot:    false,
+				GroupID:   group.ID,
+				GroupName: group.Name,
+				GroupIcon: group.Picture,
+			})
 			return true
 		})
 
